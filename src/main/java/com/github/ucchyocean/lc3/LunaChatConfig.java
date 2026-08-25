@@ -70,6 +70,9 @@ public class LunaChatConfig {
     /** プライベートメッセージを送信するときに、適用されるフォーマット */
     private String defaultFormatForPrivateMessage;
 
+    /** コマンドで検索可能なプレイヤー名の最大長 */
+    private int maxPlayerNameLength;
+
     /** OPの画面に、全チャンネルの発言内容を表示するかどうか */
     private boolean opListenAllChannel;
 
@@ -225,6 +228,8 @@ public class LunaChatConfig {
         defaultFormatForPrivateMessage =
                 config.getString("defaultFormatForPrivateMessage",
                 "&7[%player -> %to]&f %msg");
+        maxPlayerNameLength = Math.max(1,
+                config.getInt("maxPlayerNameLength", 16));
 
         opListenAllChannel = config.getBoolean("opListenAllChannel", false);
 
@@ -442,6 +447,14 @@ public class LunaChatConfig {
      */
     public String getQuickChannelChatSeparator() {
         return quickChannelChatSeparator;
+    }
+
+    /**
+     * コマンドで検索可能なプレイヤー名の最大長。
+     * @return 最大文字数
+     */
+    public int getMaxPlayerNameLength() {
+        return maxPlayerNameLength;
     }
 
     /**

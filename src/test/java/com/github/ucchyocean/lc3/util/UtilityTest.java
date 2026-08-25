@@ -25,4 +25,9 @@ public class UtilityTest extends TestCase {
 
         assertTrue("§x§F§F§E§E§D§Dtesuto§x§1§1§2§2§3§3aiueo".equals(Utility.replaceColorCode(testee)));
     }
+
+    public void testStripAnsiCodeFromWebChatLogs() {
+        assertEquals("hello", Utility.stripColorCode("\u001B[0;37;1mhello\u001B[0m"));
+        assertEquals("hello", Utility.stripColorCode("[0;37;1mhello[0m"));
+    }
 }

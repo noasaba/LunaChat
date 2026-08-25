@@ -131,7 +131,8 @@ public abstract class ChannelPlayer implements Comparable<ChannelPlayer> {
      * @return ChannelPlayer
      */
     public static ChannelPlayer getChannelPlayer(String nameOrUuid) {
-        if ( nameOrUuid.startsWith("$") ) {
+        if ( com.github.ucchyocean.lc3.util.PlayerNameValidator
+                .isValidUuidReference(nameOrUuid) ) {
             String id = nameOrUuid.substring(1);
             return new ChannelPlayerUUID(id);
         }

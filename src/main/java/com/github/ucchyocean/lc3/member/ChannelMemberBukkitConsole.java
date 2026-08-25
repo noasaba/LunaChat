@@ -8,6 +8,7 @@ package com.github.ucchyocean.lc3.member;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
 
@@ -19,13 +20,23 @@ import net.md_5.bungee.api.chat.BaseComponent;
  */
 public class ChannelMemberBukkitConsole extends ChannelMemberBukkit {
 
-    ConsoleCommandSender sender;
+    CommandSender sender;
 
     /**
      * コンストラクタ
      * @param sender コンソール
      */
     public ChannelMemberBukkitConsole(ConsoleCommandSender sender) {
+        this.sender = sender;
+    }
+
+    /**
+     * Constructor for console-like command sources such as Paper's RCON
+     * sender. The ConsoleCommandSender overload above is retained for binary
+     * compatibility with integrations compiled against older LunaChat builds.
+     * @param sender console-like command source
+     */
+    public ChannelMemberBukkitConsole(CommandSender sender) {
         this.sender = sender;
     }
 

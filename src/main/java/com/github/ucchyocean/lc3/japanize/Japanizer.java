@@ -5,7 +5,11 @@
  */
 package com.github.ucchyocean.lc3.japanize;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -38,7 +42,15 @@ public class Japanizer {
         HashMap<String, String> keywordMap = new HashMap<String, String>();
         int index = 0;
         String keywordLocked = deletedURL;
-        for ( String dickey : dictionary.keySet() ) {
+        List<String> dictionaryKeys = new ArrayList<String>(dictionary.keySet());
+        Collections.sort(dictionaryKeys, new Comparator<String>() {
+            @Override
+            public int compare(String first, String second) {
+                int lengthOrder = Integer.compare(second.length(), first.length());
+                return lengthOrder != 0 ? lengthOrder : first.compareTo(second);
+            }
+        });
+        for ( String dickey : dictionaryKeys ) {
             if ( keywordLocked.contains(dickey) ) {
                 index++;
                 String key = "＜" + makeMultibytesDigit(index) + "＞";

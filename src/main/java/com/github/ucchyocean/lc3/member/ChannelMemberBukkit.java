@@ -9,7 +9,6 @@ import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.command.BlockCommandSender;
 import org.bukkit.command.CommandSender;
-import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Player;
 
 /**
@@ -53,10 +52,13 @@ public abstract class ChannelMemberBukkit extends ChannelMember {
         if ( sender == null || !(sender instanceof CommandSender) ) return null;
         if ( sender instanceof BlockCommandSender ) {
             return new ChannelMemberBlock((BlockCommandSender)sender);
-        } else if ( sender instanceof ConsoleCommandSender ) {
-            return new ChannelMemberBukkitConsole((ConsoleCommandSender)sender);
-        } else {
+        } else if ( sender instanceof Player ) {
             return ChannelMemberPlayer.getChannelPlayer((CommandSender)sender);
+        } else {
+            // Paper 26.2's RCON sender is a CommandSender, but no longer a
+            // ConsoleCommandSender. Treat every non-player command source as
+            // console-like instead of attempting to parse its name as a UUID.
+            return new ChannelMemberBukkitConsole((CommandSender)sender);
         }
     }
 }

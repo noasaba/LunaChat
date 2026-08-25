@@ -12,10 +12,14 @@ import org.bukkit.plugin.Plugin;
 import org.dynmap.DynmapAPI;
 import org.dynmap.DynmapWebChatEvent;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import com.github.ucchyocean.lc3.LunaChat;
 import com.github.ucchyocean.lc3.LunaChatAPI;
 import com.github.ucchyocean.lc3.LunaChatConfig;
 import com.github.ucchyocean.lc3.channel.Channel;
+import com.github.ucchyocean.lc3.util.Utility;
 
 /**
  * dynmap連携クラス
@@ -76,6 +80,7 @@ public class DynmapBridge implements Listener {
         LunaChatConfig config = LunaChat.getConfig();
         String dchannel = config.getDynmapChannel();
         Channel channel = null;
+        String message = maskNGWords(event.getMessage(), config);
 
         if ( !dchannel.equals("") ) {
             // dynmapChannelが設定されている場合
@@ -94,9 +99,27 @@ public class DynmapBridge implements Listener {
         if ( channel != null ) {
             // チャンネルへ送信
             channel.chatFromOtherSource(
-                    event.getName(), event.getSource(), event.getMessage());
+                    event.getName(), event.getSource(), message);
             event.setProcessed();
-            dynmap.sendBroadcastToWeb(null, event.getMessage());
+            dynmap.sendBroadcastToWeb(null, message);
+        } else if ( config.isLoggingChat() ) {
+            String source = event.getSource();
+            String name = source == null || source.isEmpty()
+                    ? event.getName() : event.getName() + "@" + source;
+            LunaChat.getNormalChatLogger().log(
+                    Utility.stripColorCode(message), name);
         }
+    }
+
+    private static String maskNGWords(String message, LunaChatConfig config) {
+        String masked = message;
+        for ( Pattern pattern : config.getNgwordCompiled() ) {
+            Matcher matcher = pattern.matcher(masked);
+            if ( matcher.find() ) {
+                masked = matcher.replaceAll(
+                        Utility.getAstariskString(matcher.group(0).length()));
+            }
+        }
+        return masked;
     }
 }
