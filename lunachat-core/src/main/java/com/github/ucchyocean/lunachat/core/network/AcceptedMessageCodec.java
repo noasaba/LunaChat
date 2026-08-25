@@ -22,6 +22,9 @@ public final class AcceptedMessageCodec {
 
     public byte[] encode(AcceptedMessage message) {
         try {
+            if (!originAuthorMatches(message.origin().kind(), message.author())) {
+                throw new IllegalArgumentException("origin and author kinds do not match");
+            }
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
             out.writeByte(VERSION);
@@ -86,11 +89,22 @@ public final class AcceptedMessageCodec {
         Instant expiresAt = Instant.ofEpochMilli(in.readLong());
         if (in.available() != 0) throw new IOException("trailing message payload");
         try {
+            if (!originAuthorMatches(origin.kind(), author)) {
+                throw new IOException("origin and author kinds do not match");
+            }
             return new AcceptedMessage(messageId, channelId, channelName, origin, author, sourceServerId,
                     content, createdAt, expiresAt);
         } catch (IllegalArgumentException invalid) {
             throw new IOException("invalid message model", invalid);
         }
+    }
+
+    private static boolean originAuthorMatches(OriginKind origin, MessageAuthor author) {
+        return switch (origin) {
+            case MINECRAFT -> author instanceof MessageAuthor.Player;
+            case EXTERNAL -> author instanceof MessageAuthor.External;
+            case SYSTEM -> author instanceof MessageAuthor.System;
+        };
     }
 
     private static void writeString(DataOutputStream out, String value) throws IOException {

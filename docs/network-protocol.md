@@ -12,19 +12,23 @@ logical UUID but creates a new frame UUID, sequence and nonce.
 
 An authenticated `HELLO(nodeId)` starts/replaces a backend session. Velocity
 accepts it only from a `ServerConnection` whose registered server name equals
-the node ID, then returns `READY`. All later frames must match that session and
-epoch. Paper sends a bounded channel `STATE` proposal after READY. Velocity
-durably applies valid proposals before exposing them through its channel API.
+the node ID, then returns `READY`. Paper repeats HELLO periodically as a
+bounded heartbeat, so a carrier reconnect or a Velocity restart converges back
+to READY. All later frames must match that session and epoch. Paper sends a
+bounded channel `STATE` proposal after READY. Velocity durably applies valid
+proposals before exposing them through its channel API.
 
 `MESSAGE` is ACKed by logical ID. Velocity deduplicates before observer dispatch
-and cross-backend fan-out. Paper runs inbound content through its normal final
-message boundary and ACKs the final model. Loss of an ACK causes a newly
-encrypted retry; the receiver does not render or notify twice. An authenticated
-exact replay is discarded without disconnecting the session. Tamper, wrong
-secret, unknown protocol, node/session mismatch, malformed payload, and stale
-time windows close that backend session (fail closed).
+and cross-backend fan-out. The authority selects the canonical final content
+once; Paper edges render that immutable content without rerunning local event
+or filtering transforms, preserve the decoded origin/author, and ACK the same
+model. Each edge keeps a bounded logical receipt, so an ACK-loss retry (a new
+frame identity) is ACKed again without a second render. An authenticated exact
+replay is discarded without disconnecting the session. Tamper, wrong secret,
+unknown protocol, node/session mismatch, malformed payload, and stale time
+windows close that backend session (fail closed).
 
-All replay windows, receipts, external pending stages, and per-backend outboxes
+All replay windows, receipts, inbound render stages, and per-backend outboxes
 are bounded. Entries expire. No offline queue is unbounded. Plugin messaging
 uses an online player as carrier; a cold/empty backend retains only its bounded
 Velocity outbox until a player creates a backend connection and handshake.

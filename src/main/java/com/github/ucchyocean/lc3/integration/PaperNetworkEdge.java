@@ -22,9 +22,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.CompletableFuture;
 
 /** Authenticated, bounded Paper edge. Local chat never depends on this transport. */
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
@@ -37,10 +40,15 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
     private final ChannelStateCodec channelStates = new ChannelStateCodec();
     private final ReliableOutbox outbox;
+    private final int dedupCapacity;
+    private record InboundPending(CompletableFuture<AcceptedMessage> completion, Instant expiresAt) {}
+    private final Map<UUID, AcceptedMessage> inboundReceipts = new LinkedHashMap<>();
+    private final Map<UUID, InboundPending> inboundPending = new LinkedHashMap<>();
     private final UUID sessionId = UUID.randomUUID();
     private final long epoch = System.currentTimeMillis();
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicBoolean ready = new AtomicBoolean();
+    private long lastHelloMillis;
     private int taskId;
 
     static PaperNetworkEdge create(LunaChatBukkit plugin, PaperIntegrationService integration, LunaChatConfig config) {
@@ -60,6 +68,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
         this.nodeId = config.getIntegrationServerId();
         this.secure = new SecureFrameCodec(PROTOCOL, secret,
                 new ReplayWindow(config.getIntegrationDedupCapacity()), Clock.systemUTC());
+        this.dedupCapacity = config.getIntegrationDedupCapacity();
         this.outbox = new ReliableOutbox(config.getIntegrationMaxPending(), 8, Duration.ofSeconds(1));
         Bukkit.getMessenger().registerOutgoingPluginChannel(plugin, CHANNEL);
         Bukkit.getMessenger().registerIncomingPluginChannel(plugin, CHANNEL, this);
@@ -75,9 +84,10 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private void tick() {
         Player carrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
         if (carrier == null) return;
-        if (!ready.get()) {
+        long nowMillis = System.currentTimeMillis();
+        if (!ready.get() || nowMillis - lastHelloMillis >= 10_000L) {
             send(carrier, FrameType.HELLO, null, nodeId.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(10));
-            return;
+            lastHelloMillis = nowMillis;
         }
         for (ReliableOutbox.Attempt attempt : outbox.pollDue(Instant.now(), 32)) {
             SecureFrame frame = new SecureFrame(PROTOCOL, sessionId, epoch, attempt.sequence(), attempt.frameId(),
@@ -113,14 +123,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 if (!frame.logicalMessageId().equals(proposed.messageId())) {
                     throw new FrameAuthenticationException("logical identity mismatch");
                 }
-                integration.renderAccepted(proposed).whenComplete((accepted, error) ->
-                        Bukkit.getScheduler().runTask(plugin, () -> {
-                            if (error == null && accepted != null && accepted.expiresAt().isAfter(Instant.now())) {
-                                Player replyCarrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
-                                if (replyCarrier != null) send(replyCarrier, FrameType.ACK, accepted.messageId(),
-                                        messages.encode(accepted), Instant.now().plusSeconds(30));
-                            }
-                        }));
+                receiveMessage(player, proposed);
             }
         } catch (ReplayFrameException replay) {
             plugin.getLogger().fine("Discarded replayed LunaChat network frame");
@@ -129,6 +132,62 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             integration.networkUnavailable("AUTHORITY_FRAME_REJECTED");
             plugin.getLogger().warning("Rejected LunaChat network frame: " + rejected.getMessage());
         }
+    }
+
+    private void receiveMessage(Player carrier, AcceptedMessage proposed) {
+        Instant now = Instant.now();
+        AcceptedMessage already;
+        InboundPending pending;
+        boolean start = false;
+        synchronized (this) {
+            purgeInbound(now);
+            already = inboundReceipts.get(proposed.messageId());
+            if (already == null) pending = inboundPending.get(proposed.messageId());
+            else pending = null;
+            if (already == null && pending == null) {
+                if (inboundReceipts.size() + inboundPending.size() >= dedupCapacity) return;
+                pending = new InboundPending(new CompletableFuture<>(), proposed.expiresAt().plus(Duration.ofMinutes(5)));
+                inboundPending.put(proposed.messageId(), pending);
+                start = true;
+            }
+        }
+        if (already != null) {
+            sendAck(carrier, already);
+            return;
+        }
+        if (start) {
+            InboundPending current = pending;
+            integration.renderAccepted(proposed).whenComplete((accepted, error) -> {
+                synchronized (this) {
+                    inboundPending.remove(proposed.messageId());
+                    if (error == null && accepted != null && accepted.expiresAt().isAfter(Instant.now())) {
+                        purgeInbound(Instant.now());
+                        if (inboundReceipts.size() < dedupCapacity) inboundReceipts.put(accepted.messageId(), accepted);
+                    }
+                }
+                if (error == null && accepted != null && accepted.expiresAt().isAfter(Instant.now())) {
+                    current.completion().complete(accepted);
+                } else {
+                    current.completion().complete(null);
+                }
+            });
+        }
+        pending.completion().whenComplete((accepted, error) -> {
+            if (error == null && accepted != null && accepted.expiresAt().isAfter(Instant.now())) {
+                Bukkit.getScheduler().runTask(plugin, () -> sendAck(carrier, accepted));
+            }
+        });
+    }
+
+    private void sendAck(Player carrier, AcceptedMessage accepted) {
+        if (!ready.get()) return;
+        send(carrier, FrameType.ACK, accepted.messageId(), messages.encode(accepted),
+                Instant.now().plusSeconds(30));
+    }
+
+    private synchronized void purgeInbound(Instant now) {
+        inboundReceipts.values().removeIf(message -> !message.expiresAt().plus(Duration.ofMinutes(5)).isAfter(now));
+        inboundPending.values().removeIf(pending -> !pending.expiresAt().isAfter(now));
     }
 
     @Override public void close() {

@@ -391,6 +391,30 @@ public abstract class Channel {
      * @param message メッセージ
      */
     public void chatFromOtherSource(String player, @Nullable String source, String message) {
+        chatFromOtherSourceAndReturn(player, source, message);
+    }
+
+    /**
+     * Renders an already-authorized external message and returns the content
+     * after LunaChat's local safety transforms.  The original void method is
+     * retained for legacy callers; integration code uses the returned value to
+     * make the authority's final content explicit.
+     */
+    public String chatFromOtherSourceAndReturn(String player, @Nullable String source, String message) {
+        return renderFromOtherSource(player, source, message, false);
+    }
+
+    /**
+     * Renders a message whose filtering and final-content selection already
+     * happened at the network authority.  This deliberately skips local
+     * transforms so every backend displays the same canonical content.
+     */
+    public String chatFromAcceptedSource(String player, @Nullable String source, String message) {
+        return renderFromOtherSource(player, source, message, true);
+    }
+
+    private String renderFromOtherSource(String player, @Nullable String source, String message,
+            boolean canonicalContent) {
 
         LunaChatConfig config = LunaChat.getConfig();
 
@@ -402,27 +426,32 @@ public abstract class Channel {
             name = player;
         }
 
-        // NGワード発言のマスク
         String maskedMessage = new String(message);
-        for ( Pattern pattern : config.getNgwordCompiled() ) {
-            Matcher matcher = pattern.matcher(maskedMessage);
-            if ( matcher.find() ) {
-                maskedMessage = matcher.replaceAll(
-                        Utility.getAstariskString(matcher.group(0).length()));
+        if (!canonicalContent) {
+            // NGワード発言のマスク
+            for ( Pattern pattern : config.getNgwordCompiled() ) {
+                Matcher matcher = pattern.matcher(maskedMessage);
+                if ( matcher.find() ) {
+                    maskedMessage = matcher.replaceAll(
+                            Utility.getAstariskString(matcher.group(0).length()));
+                }
             }
         }
 
         // キーワード置き換え
         ClickableFormat msgFormat = ClickableFormat.makeFormat(getFormat(), new ChannelMemberOther(name), this, false);
 
-        // カラーコード置き換え チャンネルで許可されている場合に置き換える。
-        if ( isAllowCC() ) {
-            maskedMessage = Utility.replaceColorCode(maskedMessage);
+        if (!canonicalContent) {
+            // カラーコード置き換え チャンネルで許可されている場合に置き換える。
+            if ( isAllowCC() ) {
+                maskedMessage = Utility.replaceColorCode(maskedMessage);
+            }
         }
 
         // メッセージの送信
         boolean sendDynmap = source == null || !source.equals("web");
         sendMessage(new ChannelMemberOther(name), maskedMessage, msgFormat, sendDynmap);
+        return maskedMessage;
     }
 
     /**

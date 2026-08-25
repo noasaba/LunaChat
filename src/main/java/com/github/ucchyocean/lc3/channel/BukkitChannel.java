@@ -147,13 +147,16 @@ public class BukkitChannel extends Channel {
 
         // LunaChatChannelMessageEvent イベントコール
         String name = (player != null) ? player.getDisplayName() : "<null>";
-        EventResult result = LunaChat.getEventSender().sendLunaChatChannelMessageEvent(
-                getName(), player, message, recipients, name, originalMessage);
-        message = result.getMessage();
-        recipients = result.getRecipients();
-
         PaperIntegrationService integration = PaperIntegrationService.current();
-        if ( integration != null ) integration.accepted(this, player, message);
+        boolean canonicalRender = integration != null && integration.isCanonicalRender();
+        if (!canonicalRender) {
+            EventResult result = LunaChat.getEventSender().sendLunaChatChannelMessageEvent(
+                    getName(), player, message, recipients, name, originalMessage);
+            message = result.getMessage();
+            recipients = result.getRecipients();
+        }
+
+        if ( integration != null && !canonicalRender ) integration.accepted(this, player, message);
 
         // 通常ブロードキャストなら、設定に応じてdynmapへ送信する
         DynmapBridge dynmap = LunaChatBukkit.getInstance().getDynmap();

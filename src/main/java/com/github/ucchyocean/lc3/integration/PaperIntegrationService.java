@@ -29,6 +29,7 @@ public final class PaperIntegrationService {
     private final ChannelManager manager;
     private final InMemoryChannelDirectory directory = new InMemoryChannelDirectory();
     private final ThreadLocal<Pending> externalCall = new ThreadLocal<>();
+    private final ThreadLocal<Boolean> canonicalRender = new ThreadLocal<>();
     private final IntegrationRuntime runtime;
     private final PaperNetworkEdge networkEdge;
 
@@ -79,26 +80,43 @@ public final class PaperIntegrationService {
         Bukkit.getScheduler().runTask(plugin, () -> {
             Channel channel = manager.getChannels().stream()
                     .filter(candidate -> candidate.getChannelId().equals(proposed.channelId())).findFirst().orElse(null);
-            if (channel == null || !channel.isAcceptsExternalMessages()) {
+            if (channel == null || (proposed.origin().kind() == OriginKind.EXTERNAL
+                    && !channel.isAcceptsExternalMessages())) {
                 completion.complete(null);
                 return;
             }
-            externalCall.set(new Pending(proposed, completion));
+            boolean preserveCanonicalContent = runtime.runtimeRole() == RuntimeRole.NETWORK_EDGE;
+            if (preserveCanonicalContent) canonicalRender.set(Boolean.TRUE);
+            else externalCall.set(new Pending(proposed, completion));
             try {
-                MessageAuthor.External author = (MessageAuthor.External) proposed.author();
-                channel.chatFromOtherSource(author.displayName(), proposed.origin().namespace(), proposed.content());
-                if (!completion.isDone()) completion.complete(null);
+                String displayName = switch (proposed.author()) {
+                    case MessageAuthor.Player player -> player.displayName();
+                    case MessageAuthor.External external -> external.displayName();
+                    case MessageAuthor.System system -> system.name();
+                };
+                String rendered = preserveCanonicalContent
+                        ? channel.chatFromAcceptedSource(displayName, proposed.origin().namespace(), proposed.content())
+                        : channel.chatFromOtherSourceAndReturn(displayName, proposed.origin().namespace(), proposed.content());
+                if (!completion.isDone()) completion.complete(withContent(proposed, rendered));
             } catch (RuntimeException error) {
                 completion.completeExceptionally(error);
             } finally {
                 externalCall.remove();
+                canonicalRender.remove();
             }
         });
         return completion;
     }
 
+    private static AcceptedMessage withContent(AcceptedMessage proposed, String content) {
+        return new AcceptedMessage(proposed.messageId(), proposed.channelId(), proposed.channelName(),
+                proposed.origin(), proposed.author(), proposed.sourceServerId(), content,
+                proposed.createdAt(), proposed.expiresAt());
+    }
+
     /** Called after filters/events have fixed final content, before local rendering. */
     public void accepted(Channel channel, ChannelMember member, String finalContent) {
+        if (Boolean.TRUE.equals(canonicalRender.get())) return;
         Pending pending = externalCall.get();
         if (pending != null) {
             AcceptedMessage proposed = pending.proposed();
@@ -112,6 +130,11 @@ public final class PaperIntegrationService {
             return;
         }
         runtime.authorityGateway().accept(localMessage(channel, member, finalContent));
+    }
+
+    /** True while a network-authority-finalized message is being displayed. */
+    public boolean isCanonicalRender() {
+        return Boolean.TRUE.equals(canonicalRender.get());
     }
 
     private AcceptedMessage localMessage(Channel channel, ChannelMember member, String finalContent) {

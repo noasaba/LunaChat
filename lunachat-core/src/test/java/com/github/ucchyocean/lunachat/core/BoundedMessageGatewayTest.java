@@ -87,6 +87,24 @@ class BoundedMessageGatewayTest {
         gateway.close();
     }
 
+    @Test void minecraftAcceptanceIsIndependentOfExternalChannelPolicy() throws Exception {
+        InMemoryChannelDirectory directory = new InMemoryChannelDirectory();
+        ChannelDescriptor channel = new ChannelDescriptor(CHANNEL.id(), "global", Set.of(), false);
+        directory.put(channel);
+        BoundedMessageGateway gateway = new BoundedMessageGateway(directory,
+                message -> CompletableFuture.completedFuture(message), Clock.fixed(NOW, ZoneOffset.UTC), "paper-1", 4, 4);
+        CountDownLatch observed = new CountDownLatch(1);
+        gateway.observeAcceptedMessages(message -> observed.countDown());
+        UUID logicalId = UUID.randomUUID();
+        AcceptedMessage message = new AcceptedMessage(logicalId, channel.id(), channel.name(),
+                new MessageOrigin(OriginKind.MINECRAFT, "lunachat.minecraft", "minecraft-1"),
+                new MessageAuthor.Player(UUID.randomUUID(), "player", "Player"), "paper-1", "hello",
+                NOW, NOW.plusSeconds(60));
+        assertTrue(gateway.accept(message));
+        assertTrue(observed.await(2, TimeUnit.SECONDS));
+        gateway.close();
+    }
+
     private static ExternalMessageRequest request(String id, Instant created) {
         return new ExternalMessageRequest(CHANNEL.id(), new ExternalMessageIdentity("lunabridge.discord", id),
                 new MessageAuthor.External("lunabridge.discord", "user", "User"), "hello", created, Duration.ofMinutes(1));

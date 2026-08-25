@@ -34,7 +34,6 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Velocity network authority and authenticated routing state machine. */
 final class VelocityNetworkAuthority implements AutoCloseable {
     private record Session(UUID id, long epoch) {}
-    private record Pending(CompletableFuture<AcceptedMessage> completion, Instant expiresAt) {}
     private final ProxyServer proxy;
     private final Logger logger;
     private final ChannelIdentifier channel;
@@ -45,9 +44,9 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     private final ChannelStateCodec channelStates = new ChannelStateCodec();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, ReliableOutbox> outboxes = new ConcurrentHashMap<>();
-    private final Map<UUID, Pending> pendingExternal = new ConcurrentHashMap<>();
     private final Map<UUID, Instant> inboundReceipts = new LinkedHashMap<>();
     private final AtomicLong sequence = new AtomicLong();
+    private final int pendingCapacity;
     private final int receiptCapacity;
     private final IntegrationRuntime runtime;
 
@@ -57,6 +56,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         this.logger = logger;
         this.channel = channel;
         this.store = store;
+        this.pendingCapacity = pendingCapacity;
         this.receiptCapacity = receiptCapacity;
         directory.replace(store.snapshot());
         secure = new SecureFrameCodec(1, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
@@ -101,14 +101,6 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             } else if (frame.type() == FrameType.ACK && frame.logicalMessageId() != null) {
                 ReliableOutbox outbox = outboxes.get(sourceNode);
                 if (outbox != null) outbox.acknowledge(frame.logicalMessageId());
-                Pending pending = pendingExternal.remove(frame.logicalMessageId());
-                if (pending != null) {
-                    AcceptedMessage finalMessage = messages.decode(frame.payload());
-                    if (!frame.logicalMessageId().equals(finalMessage.messageId())) {
-                        throw new FrameAuthenticationException("ACK logical identity mismatch");
-                    }
-                    pending.completion().complete(finalMessage);
-                }
             }
         } catch (ReplayFrameException replay) {
             logger.debug("Discarded replayed LunaChat frame from {}", sourceNode);
@@ -120,10 +112,6 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     private CompletableFuture<AcceptedMessage> commitExternal(AcceptedMessage message) {
         CompletableFuture<AcceptedMessage> completion = new CompletableFuture<>();
-        if (pendingExternal.size() >= receiptCapacity) {
-            completion.complete(null);
-            return completion;
-        }
         int committed = 0;
         Instant now = Instant.now();
         for (ReliableOutbox outbox : outboxes.values()) {
@@ -132,7 +120,15 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         if (committed == 0) {
             completion.complete(null);
         } else {
-            pendingExternal.put(message.messageId(), new Pending(completion, message.expiresAt()));
+            if (committed < outboxes.size()) {
+                logger.warn("External message {} admitted with partial backend coverage ({}/{})",
+                        message.messageId(), committed, outboxes.size());
+            }
+            // The authority has selected the canonical final content and
+            // durably admitted it to at least one bounded backend outbox.
+            // Client ACKs report delivery only; they must not replace the
+            // canonical content or delay publication indefinitely.
+            completion.complete(message);
         }
         return completion;
     }
@@ -149,15 +145,11 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     void tick() {
         Instant now = Instant.now();
-        inboundReceipts.values().removeIf(expiry -> !expiry.isAfter(now));
-        pendingExternal.entrySet().removeIf(entry -> {
-            boolean queued = outboxes.values().stream().anyMatch(outbox -> outbox.contains(entry.getKey(), now));
-            if (!entry.getValue().expiresAt().isAfter(now) || !queued) {
-                entry.getValue().completion().complete(null);
-                return true;
-            }
-            return false;
-        });
+        proxy.getAllServers().forEach(server -> outboxes.computeIfAbsent(server.getServerInfo().getName(),
+                ignored -> new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
+        synchronized (this) {
+            inboundReceipts.values().removeIf(expiry -> !expiry.isAfter(now));
+        }
         outboxes.forEach((node, outbox) -> {
             Session session = sessions.get(node);
             if (session == null) return;
@@ -197,8 +189,6 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     @Override public void close() {
-        pendingExternal.values().forEach(pending -> pending.completion().complete(null));
-        pendingExternal.clear();
         sessions.clear();
         runtime.close();
     }

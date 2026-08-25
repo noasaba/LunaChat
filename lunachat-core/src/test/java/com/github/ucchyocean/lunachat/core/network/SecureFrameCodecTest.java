@@ -1,5 +1,10 @@
 package com.github.ucchyocean.lunachat.core.network;
 
+import com.github.ucchyocean.lunachat.api.AcceptedMessage;
+import com.github.ucchyocean.lunachat.api.ChannelId;
+import com.github.ucchyocean.lunachat.api.MessageAuthor;
+import com.github.ucchyocean.lunachat.api.MessageOrigin;
+import com.github.ucchyocean.lunachat.api.OriginKind;
 import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
@@ -37,6 +42,29 @@ class SecureFrameCodecTest {
         AcceptedMessageCodec codec = new AcceptedMessageCodec();
         assertEquals(original, codec.decode(codec.encode(original)));
         assertEquals(channel, codec.decode(codec.encode(original)).channelId());
+    }
+
+    @Test void messageWireRoundTripPreservesMinecraftPlayerAndSystemAuthors() throws Exception {
+        ChannelId channel = ChannelId.random();
+        AcceptedMessage player = new AcceptedMessage(UUID.randomUUID(), channel, "global",
+                new MessageOrigin(OriginKind.MINECRAFT, "lunachat.minecraft", "minecraft-42"),
+                new MessageAuthor.Player(UUID.randomUUID(), "player", "Player Display"),
+                "paper-a", "hello", NOW, NOW.plusSeconds(60));
+        AcceptedMessage system = new AcceptedMessage(UUID.randomUUID(), channel, "global",
+                new MessageOrigin(OriginKind.SYSTEM, "lunachat.system", "system-42"),
+                new MessageAuthor.System("LunaChat"), "velocity", "notice", NOW, NOW.plusSeconds(60));
+        AcceptedMessageCodec codec = new AcceptedMessageCodec();
+        assertEquals(player, codec.decode(codec.encode(player)));
+        assertEquals(system, codec.decode(codec.encode(system)));
+    }
+
+    @Test void messageWireRejectsOriginAuthorMismatch() {
+        ChannelId channel = ChannelId.random();
+        AcceptedMessage invalid = new AcceptedMessage(UUID.randomUUID(), channel, "global",
+                new MessageOrigin(OriginKind.MINECRAFT, "lunachat.minecraft", "minecraft-42"),
+                new MessageAuthor.External("discord", "user-1", "User"),
+                "paper-a", "hello", NOW, NOW.plusSeconds(60));
+        assertThrows(IllegalArgumentException.class, () -> new AcceptedMessageCodec().encode(invalid));
     }
 
     @Test void boundedOutboxRecoversCapacityAfterExpiry() {
