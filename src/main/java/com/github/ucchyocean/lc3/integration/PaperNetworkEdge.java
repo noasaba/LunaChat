@@ -76,7 +76,8 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     }
 
     void offer(AcceptedMessage message) {
-        if (!outbox.offer(message.messageId(), messages.encode(message), message.expiresAt(), Instant.now())) {
+        AcceptedMessage canonical = messages.canonicalize(message);
+        if (!outbox.offer(canonical.messageId(), messages.encode(canonical), canonical.expiresAt(), Instant.now())) {
             plugin.getLogger().warning("LunaChat network outbox full; local message remains local: " + message.messageId());
         }
     }

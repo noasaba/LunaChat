@@ -94,9 +94,10 @@ public final class PaperIntegrationService {
                     case MessageAuthor.External external -> external.displayName();
                     case MessageAuthor.System system -> system.name();
                 };
+                String displaySource = displaySourceFor(proposed);
                 String rendered = preserveCanonicalContent
-                        ? channel.chatFromAcceptedSource(displayName, proposed.origin().namespace(), proposed.content())
-                        : channel.chatFromOtherSourceAndReturn(displayName, proposed.origin().namespace(), proposed.content());
+                        ? channel.chatFromAcceptedSource(displayName, displaySource, proposed.content())
+                        : channel.chatFromOtherSourceAndReturn(displayName, displaySource, proposed.content());
                 if (!completion.isDone()) completion.complete(withContent(proposed, rendered));
             } catch (RuntimeException error) {
                 completion.completeExceptionally(error);
@@ -106,6 +107,11 @@ public final class PaperIntegrationService {
             }
         });
         return completion;
+    }
+
+    /** External namespaces identify integrations; they are not chat display suffixes. */
+    static String displaySourceFor(AcceptedMessage message) {
+        return message.origin().kind() == OriginKind.EXTERNAL ? null : message.origin().namespace();
     }
 
     private static AcceptedMessage withContent(AcceptedMessage proposed, String content) {

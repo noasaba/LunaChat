@@ -44,6 +44,22 @@ class SecureFrameCodecTest {
         assertEquals(channel, codec.decode(codec.encode(original)).channelId());
     }
 
+    @Test void messageWireRoundTripCanonicalizesNanosecondTimestamps() throws Exception {
+        ChannelId channel = ChannelId.random();
+        Instant created = Instant.parse("2026-08-25T00:00:00.123456789Z");
+        Instant expires = Instant.parse("2026-08-25T00:05:00.987654321Z");
+        AcceptedMessage original = new AcceptedMessage(UUID.randomUUID(), channel, "global",
+                new MessageOrigin(OriginKind.EXTERNAL, "lunabridge:discord", "discord-precision"),
+                new MessageAuthor.External("lunabridge:discord", "user-7", "Noa"),
+                "velocity", "aaaa", created, expires);
+        AcceptedMessageCodec codec = new AcceptedMessageCodec();
+        AcceptedMessage decoded = codec.decode(codec.encode(original));
+        assertEquals(Instant.ofEpochMilli(created.toEpochMilli()), decoded.createdAt());
+        assertEquals(Instant.ofEpochMilli(expires.toEpochMilli()), decoded.expiresAt());
+        assertEquals(codec.canonicalize(original), decoded);
+        assertNotEquals(original, decoded);
+    }
+
     @Test void messageWireRoundTripPreservesMinecraftPlayerAndSystemAuthors() throws Exception {
         ChannelId channel = ChannelId.random();
         AcceptedMessage player = new AcceptedMessage(UUID.randomUUID(), channel, "global",

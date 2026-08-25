@@ -13,6 +13,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 /** Internal, bounded wire representation of the public immutable message model. */
@@ -20,7 +21,21 @@ public final class AcceptedMessageCodec {
     private static final int VERSION = 1;
     private static final int MAX_STRING_BYTES = 32767;
 
+    /**
+     * Returns the exact AcceptedMessage representation carried by wire v1.
+     * Wire timestamps are epoch milliseconds, so truncating before admission
+     * keeps the authority's pending identity equal to every decoded ACK.
+     */
+    public AcceptedMessage canonicalize(AcceptedMessage message) {
+        Objects.requireNonNull(message, "message");
+        return new AcceptedMessage(message.messageId(), message.channelId(), message.channelName(),
+                message.origin(), message.author(), message.sourceServerId(), message.content(),
+                Instant.ofEpochMilli(message.createdAt().toEpochMilli()),
+                Instant.ofEpochMilli(message.expiresAt().toEpochMilli()));
+    }
+
     public byte[] encode(AcceptedMessage message) {
+        message = canonicalize(message);
         try {
             if (!originAuthorMatches(message.origin().kind(), message.author())) {
                 throw new IllegalArgumentException("origin and author kinds do not match");

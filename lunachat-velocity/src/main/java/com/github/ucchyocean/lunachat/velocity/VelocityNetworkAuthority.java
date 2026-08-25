@@ -125,21 +125,22 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     private CompletableFuture<AcceptedMessage> commitExternal(AcceptedMessage message) {
+        AcceptedMessage canonical = messages.canonicalize(message);
         CompletableFuture<AcceptedMessage> completion = new CompletableFuture<>();
-        PendingExternal pending = new PendingExternal(message, completion);
-        pendingExternal.put(message.messageId(), pending);
+        PendingExternal pending = new PendingExternal(canonical, completion);
+        pendingExternal.put(canonical.messageId(), pending);
         int committed = 0;
         Instant now = Instant.now();
         for (ReliableOutbox outbox : outboxes.values()) {
-            if (outbox.offer(message.messageId(), messages.encode(message), message.expiresAt(), now)) committed++;
+            if (outbox.offer(canonical.messageId(), messages.encode(canonical), canonical.expiresAt(), now)) committed++;
         }
         if (committed == 0) {
-            pendingExternal.remove(message.messageId(), pending);
+            pendingExternal.remove(canonical.messageId(), pending);
             completion.complete(null);
         } else {
             if (committed < outboxes.size()) {
                 logger.warn("External message {} admitted with partial backend coverage ({}/{})",
-                        message.messageId(), committed, outboxes.size());
+                        canonical.messageId(), committed, outboxes.size());
             }
         }
         return completion;
@@ -166,11 +167,12 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     private void enqueueForOtherBackends(String sourceNode, AcceptedMessage message) {
-        byte[] payload = messages.encode(message);
+        AcceptedMessage canonical = messages.canonicalize(message);
+        byte[] payload = messages.encode(canonical);
         Instant now = Instant.now();
         outboxes.forEach((node, outbox) -> {
-            if (!node.equals(sourceNode) && !outbox.offer(message.messageId(), payload, message.expiresAt(), now)) {
-                logger.warn("Network outbox for {} rejected logical message {}", node, message.messageId());
+            if (!node.equals(sourceNode) && !outbox.offer(canonical.messageId(), payload, canonical.expiresAt(), now)) {
+                logger.warn("Network outbox for {} rejected logical message {}", node, canonical.messageId());
             }
         });
     }
