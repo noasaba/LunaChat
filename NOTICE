@@ -1,5 +1,16 @@
-LunaChat fork 4.x provenance notice
-===================================
+LunaChat fork 4.x notice and provenance
+=======================================
+
+LunaChat is distributed under the GNU Lesser General Public License, version 3
+(LGPL-3.0).  A complete copy is provided as `LICENSE`.  The runtime and
+library JARs carry `LICENSE` and this `NOTICE` at their archive root; the
+distribution ZIP carries both files beside every JAR, including the generated
+API Javadoc.
+
+The LunaChat distribution consists of the Paper plugin, the Velocity plugin,
+the platform-independent Integration API, and the Integration API testkit.
+The testkit is a development/test artifact and is not bundled into either
+runtime plugin.
 
 The original LunaChat source and its retained compatibility APIs are Copyright
 ucchy and contributors and remain licensed under GNU LGPL version 3 as stated

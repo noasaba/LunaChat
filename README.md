@@ -26,5 +26,8 @@ http://sourceforge.jp/magazine/07/09/05/017211<br />
 ビルド成果物は `lunachat-paper/target/LunaChat.jar` と
 `lunachat-velocity/target/LunaChat-Velocity.jar` です。公開 Integration API は
 `lunachat-api`、実装非依存 TCK は `lunachat-api-testkit` に分離されています。
+配布用のZIP（Paper、Velocity、API本体・Javadoc、`lunachat-api-testkit.jar`、
+`LICENSE`、`NOTICE`を収録）は `./scripts/build-distribution.sh` で生成できます。
+各JARにも `LICENSE` と `NOTICE` を同梱しています。
 
 設計、導入、upgrade 手順は [Integration API design](docs/integration-api.md) を参照してください。

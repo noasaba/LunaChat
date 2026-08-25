@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Velocity network authority and authenticated routing state machine. */
 final class VelocityNetworkAuthority implements AutoCloseable {
     private record Session(UUID id, long epoch) {}
+    private record PendingExternal(AcceptedMessage message, CompletableFuture<AcceptedMessage> completion) {}
     private final ProxyServer proxy;
     private final Logger logger;
     private final ChannelIdentifier channel;
@@ -44,6 +45,12 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     private final ChannelStateCodec channelStates = new ChannelStateCodec();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, ReliableOutbox> outboxes = new ConcurrentHashMap<>();
+    /**
+     * External publishes remain pending until a Paper edge acknowledges that
+     * LunaChat accepted and rendered the canonical message.  Putting a frame
+     * in an outbox is transport admission only; it is not API admission.
+     */
+    private final Map<UUID, PendingExternal> pendingExternal = new ConcurrentHashMap<>();
     private final Map<UUID, Instant> inboundReceipts = new LinkedHashMap<>();
     private final AtomicLong sequence = new AtomicLong();
     private final int pendingCapacity;
@@ -101,6 +108,13 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             } else if (frame.type() == FrameType.ACK && frame.logicalMessageId() != null) {
                 ReliableOutbox outbox = outboxes.get(sourceNode);
                 if (outbox != null) outbox.acknowledge(frame.logicalMessageId());
+                if (frame.payload().length > 0) {
+                    AcceptedMessage acknowledged = messages.decode(frame.payload());
+                    if (!frame.logicalMessageId().equals(acknowledged.messageId())) {
+                        throw new FrameAuthenticationException("acknowledgement identity mismatch");
+                    }
+                    acknowledgeExternal(acknowledged);
+                }
             }
         } catch (ReplayFrameException replay) {
             logger.debug("Discarded replayed LunaChat frame from {}", sourceNode);
@@ -112,25 +126,43 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     private CompletableFuture<AcceptedMessage> commitExternal(AcceptedMessage message) {
         CompletableFuture<AcceptedMessage> completion = new CompletableFuture<>();
+        PendingExternal pending = new PendingExternal(message, completion);
+        pendingExternal.put(message.messageId(), pending);
         int committed = 0;
         Instant now = Instant.now();
         for (ReliableOutbox outbox : outboxes.values()) {
             if (outbox.offer(message.messageId(), messages.encode(message), message.expiresAt(), now)) committed++;
         }
         if (committed == 0) {
+            pendingExternal.remove(message.messageId(), pending);
             completion.complete(null);
         } else {
             if (committed < outboxes.size()) {
                 logger.warn("External message {} admitted with partial backend coverage ({}/{})",
                         message.messageId(), committed, outboxes.size());
             }
-            // The authority has selected the canonical final content and
-            // durably admitted it to at least one bounded backend outbox.
-            // Client ACKs report delivery only; they must not replace the
-            // canonical content or delay publication indefinitely.
-            completion.complete(message);
         }
         return completion;
+    }
+
+    /** Completes the API admission only after a Paper edge's accepted ACK. */
+    private void acknowledgeExternal(AcceptedMessage acknowledged) throws FrameAuthenticationException {
+        PendingExternal pending = pendingExternal.get(acknowledged.messageId());
+        if (pending == null) return;
+        AcceptedMessage proposed = pending.message();
+        if (!proposed.channelId().equals(acknowledged.channelId())
+                || !proposed.origin().equals(acknowledged.origin())
+                || !proposed.author().equals(acknowledged.author())
+                || !proposed.sourceServerId().equals(acknowledged.sourceServerId())
+                || !proposed.createdAt().equals(acknowledged.createdAt())
+                || !proposed.expiresAt().equals(acknowledged.expiresAt())) {
+            throw new FrameAuthenticationException("external acknowledgement changed message identity");
+        }
+        if (pendingExternal.remove(acknowledged.messageId(), pending)) {
+            // The authority's canonical content remains authoritative.  The
+            // Paper ACK is the acceptance signal, not a content replacement.
+            pending.completion().complete(proposed);
+        }
     }
 
     private void enqueueForOtherBackends(String sourceNode, AcceptedMessage message) {
@@ -147,6 +179,13 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         Instant now = Instant.now();
         proxy.getAllServers().forEach(server -> outboxes.computeIfAbsent(server.getServerInfo().getName(),
                 ignored -> new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
+        pendingExternal.forEach((messageId, pending) -> {
+            boolean queued = outboxes.values().stream().anyMatch(outbox -> outbox.contains(messageId, now));
+            if ((!pending.message().expiresAt().isAfter(now) || !queued)
+                    && pendingExternal.remove(messageId, pending)) {
+                pending.completion().complete(null);
+            }
+        });
         synchronized (this) {
             inboundReceipts.values().removeIf(expiry -> !expiry.isAfter(now));
         }
@@ -190,6 +229,8 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     @Override public void close() {
         sessions.clear();
+        pendingExternal.values().forEach(pending -> pending.completion().complete(null));
+        pendingExternal.clear();
         runtime.close();
     }
 }
