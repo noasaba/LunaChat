@@ -13,6 +13,7 @@ import com.github.ucchyocean.lc3.LunaChat;
 import com.github.ucchyocean.lc3.LunaChatBungee;
 import com.github.ucchyocean.lc3.bridge.BungeePermsBridge;
 import com.github.ucchyocean.lc3.bridge.LuckPermsBridge;
+import com.github.ucchyocean.lc3.util.PlayerNameValidator;
 
 import net.md_5.bungee.api.ProxyServer;
 import net.md_5.bungee.api.chat.BaseComponent;
@@ -50,9 +51,11 @@ public class ChannelMemberProxiedPlayer extends ChannelMemberBungee {
      * @return ChannelMemberProxiedPlayer
      */
     public static ChannelMemberProxiedPlayer getChannelMember(String nameOrUuid) {
-        if ( nameOrUuid.startsWith("$") ) {
+        if ( nameOrUuid == null ) return null;
+        if ( PlayerNameValidator.isValidUuidReference(nameOrUuid) ) {
             return new ChannelMemberProxiedPlayer(UUID.fromString(nameOrUuid.substring(1)));
-        } else {
+        } else if ( PlayerNameValidator.isValidName(nameOrUuid,
+                LunaChat.getConfig().getMaxPlayerNameLength()) ) {
             ProxiedPlayer player = ProxyServer.getInstance().getPlayer(nameOrUuid);
             if ( player != null ) return new ChannelMemberProxiedPlayer(player.getUniqueId());
         }

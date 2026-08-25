@@ -114,6 +114,9 @@ quickChannelChatSeparator: ':'
 defaultFormatForPrivateMessage: '&7[%player -> %to]&f %msg'
 #defaultFormatForPrivateMessage: '&7[%player@%server > %to@%recieverserver] %msg'
 
+# サーバーのプロフィール検索を行う前に拒否するプレイヤー名の最大文字数。
+maxPlayerNameLength: 16
+
 
 # -------------------- dynmap連携設定 --------------------
 

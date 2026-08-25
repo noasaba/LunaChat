@@ -13,6 +13,8 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
+import com.github.ucchyocean.lc3.util.PlayerNameValidator;
+
 /**
  * UUID管理のプレイヤー
  * @author ucchy
@@ -44,6 +46,8 @@ public class ChannelPlayerUUID extends ChannelPlayer {
      * @return ChannelPlayerUUID
      */
     public static ChannelPlayerUUID getChannelPlayerUUIDFromName(String name) {
+        if ( !PlayerNameValidator.isValidName(
+                name, PlayerNameValidator.DEFAULT_MAX_LENGTH) ) return null;
         Player player = Bukkit.getPlayerExact(name);
         if ( player != null ) {
             return new ChannelPlayerUUID(player.getUniqueId());

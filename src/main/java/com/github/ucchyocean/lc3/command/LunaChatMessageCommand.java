@@ -13,6 +13,7 @@ import com.github.ucchyocean.lc3.LunaChatAPI;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerNameValidator;
 
 /**
  * 1:1チャット送信コマンド
@@ -66,6 +67,12 @@ public class LunaChatMessageCommand {
      * @param message
      */
     protected void sendTellMessage(ChannelMember inviter, String invitedName, String message) {
+
+        if ( !PlayerNameValidator.isValidName(invitedName,
+                LunaChat.getConfig().getMaxPlayerNameLength()) ) {
+            inviter.sendMessage(Messages.errmsgNotfoundPlayer(invitedName));
+            return;
+        }
 
         // 招待相手が存在するかどうかを確認する
         ChannelMember invited = ChannelMember.getChannelMember(invitedName);

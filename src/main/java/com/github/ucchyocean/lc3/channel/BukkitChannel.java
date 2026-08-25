@@ -24,6 +24,7 @@ import com.github.ucchyocean.lc3.event.EventResult;
 import com.github.ucchyocean.lc3.member.ChannelMember;
 import com.github.ucchyocean.lc3.member.ChannelMemberBukkit;
 import com.github.ucchyocean.lc3.util.ClickableFormat;
+import com.github.ucchyocean.lc3.util.Utility;
 import com.github.ucchyocean.lc3.util.UtilityBukkit;
 
 import net.md_5.bungee.api.chat.BaseComponent;
@@ -259,7 +260,7 @@ public class BukkitChannel extends Channel {
         // LunaChatのチャットログへ記録
         LunaChatConfig config = LunaChat.getConfig();
         if ( config.isLoggingChat() && logger != null ) {
-            logger.log(message, name);
+            logger.log(Utility.stripColorCode(message), name);
         }
 
         // TODO ログ記録プラグイン連携を検討する

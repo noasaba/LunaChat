@@ -113,6 +113,9 @@ quickChannelChatSeparator: ':'
 defaultFormatForPrivateMessage: '&7[%player -> %to]&f %msg'
 #defaultFormatForPrivateMessage: '&7[%player@%server > %to@%recieverserver] %msg'
 
+# Reject longer lookup targets before calling the server profile API.
+maxPlayerNameLength: 16
+
 
 # -------------------- dynmap linkage setting --------------------
 

@@ -18,6 +18,7 @@ import com.github.ucchyocean.lc3.LunaChat;
 import com.github.ucchyocean.lc3.LunaChatBukkit;
 import com.github.ucchyocean.lc3.bridge.VaultChatBridge;
 import com.github.ucchyocean.lc3.util.BlockLocation;
+import com.github.ucchyocean.lc3.util.PlayerNameValidator;
 
 import net.md_5.bungee.api.chat.BaseComponent;
 
@@ -51,6 +52,8 @@ public class ChannelMemberPlayer extends ChannelMemberBukkit {
      * @return ChannelMemberPlayer
      */
     public static ChannelMemberPlayer getChannelMemberPlayerFromName(String name) {
+        if ( !PlayerNameValidator.isValidName(name,
+                LunaChat.getConfig().getMaxPlayerNameLength()) ) return null;
         Player player = Bukkit.getPlayerExact(name);
         if ( player != null ) {
             return new ChannelMemberPlayer(player.getUniqueId());
@@ -291,14 +294,17 @@ public class ChannelMemberPlayer extends ChannelMemberBukkit {
     }
 
     public static ChannelMemberPlayer getChannelMember(String nameOrUuid) {
-        if ( nameOrUuid.startsWith("$") ) {
+        if ( nameOrUuid == null ) return null;
+        if ( PlayerNameValidator.isValidUuidReference(nameOrUuid) ) {
             return new ChannelMemberPlayer(nameOrUuid.substring(1));
-        } else {
+        } else if ( PlayerNameValidator.isValidName(nameOrUuid,
+                LunaChat.getConfig().getMaxPlayerNameLength()) ) {
             @SuppressWarnings("deprecation")
             OfflinePlayer op = Bukkit.getOfflinePlayer(nameOrUuid);
             if ( op == null ) return null;
             return new ChannelMemberPlayer(op.getUniqueId());
         }
+        return null;
     }
 
     public ChannelMemberOther toChannelMemberOther() {

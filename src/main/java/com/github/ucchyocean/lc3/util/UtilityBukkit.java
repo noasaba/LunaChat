@@ -40,7 +40,8 @@ public class UtilityBukkit {
      */
     @SuppressWarnings("deprecation")
     public static OfflinePlayer getOfflinePlayer(String name) {
-        if (name == null) return null;
+        if (!PlayerNameValidator.isValidName(
+                name, PlayerNameValidator.DEFAULT_MAX_LENGTH)) return null;
         OfflinePlayer player = Bukkit.getOfflinePlayer(name);
         if (player == null || (!player.hasPlayedBefore() && !player.isOnline()))
             return null;

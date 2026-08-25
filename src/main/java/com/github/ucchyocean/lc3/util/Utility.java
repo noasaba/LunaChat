@@ -118,7 +118,14 @@ public class Utility {
      */
     public static String stripColorCode(String source) {
         if (source == null) return null;
-        return stripAltColorCode(source).replaceAll("\u00A7([0-9a-fk-orxA-FK-ORX])", "");
+        return stripAnsiCode(stripAltColorCode(source))
+                .replaceAll("\u00A7([0-9a-fk-orxA-FK-ORX])", "");
+    }
+
+    /** Removes ANSI SGR sequences, including Dynmap's legacy escaped form. */
+    public static String stripAnsiCode(String source) {
+        if ( source == null ) return null;
+        return source.replaceAll("(?:\\u001B)?\\[[0-9;]*m", "");
     }
 
     /**

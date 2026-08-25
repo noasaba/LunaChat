@@ -5,6 +5,7 @@
  */
 package com.github.ucchyocean.lc3.bridge;
 
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -42,7 +43,13 @@ public class McMMOBridge implements Listener {
         List<Player> recipients = PartyAPI.getOnlineMembers(event.getParty());
 
         String message = event.getMessage();
-        ChannelMember player = ChannelMember.getChannelMember(event.getSender());
+        String senderName = resolveSenderName(event);
+        if ( senderName == null ) {
+            LunaChat.getPlugin().log(java.util.logging.Level.WARNING,
+                    "Unable to resolve the mcMMO party chat sender.");
+            return;
+        }
+        ChannelMember player = ChannelMember.getChannelMember(senderName);
         LunaChatConfig config = LunaChat.getConfig();
         LunaChatAPI api = LunaChat.getAPI();
 
@@ -111,5 +118,27 @@ public class McMMOBridge implements Listener {
 
         // 発言内容の設定
         event.setMessage(message);
+    }
+
+    /**
+     * mcMMO 2.1.154 removed getSender() in favour of
+     * getDisplayName(ChatChannel). Reflection keeps older releases compatible.
+     */
+    static String resolveSenderName(Object event) {
+        try {
+            ClassLoader loader = event.getClass().getClassLoader();
+            Class<?> channelClass = Class.forName(
+                    "com.gmail.nossr50.datatypes.chat.ChatChannel", true, loader);
+            @SuppressWarnings({ "rawtypes", "unchecked" })
+            Object party = Enum.valueOf((Class<? extends Enum>)channelClass, "PARTY");
+            Method displayName = event.getClass().getMethod("getDisplayName", channelClass);
+            return (String)displayName.invoke(event, party);
+        } catch (ReflectiveOperationException | LinkageError modernApiUnavailable) {
+            try {
+                return (String)event.getClass().getMethod("getSender").invoke(event);
+            } catch (ReflectiveOperationException | LinkageError legacyApiUnavailable) {
+                return null;
+            }
+        }
     }
 }
