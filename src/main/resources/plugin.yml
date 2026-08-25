@@ -1,4 +1,5 @@
-name: ${project.name}
+# Paper 26.2 rejects plugin names containing spaces.
+name: LunaChat
 main: com.github.ucchyocean.lc3.LunaChatBukkit
 version: ${project.version}
 api-version: '26.2'
