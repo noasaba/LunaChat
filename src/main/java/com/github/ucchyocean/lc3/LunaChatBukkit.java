@@ -30,6 +30,8 @@ import com.github.ucchyocean.lc3.bridge.VaultChatBridge;
 import com.github.ucchyocean.lc3.bukkit.BukkitEventListener;
 import com.github.ucchyocean.lc3.bukkit.BukkitEventSender;
 import com.github.ucchyocean.lc3.channel.ChannelManager;
+import com.github.ucchyocean.lc3.integration.ChannelDataMigrator;
+import com.github.ucchyocean.lc3.integration.PaperIntegrationService;
 import com.github.ucchyocean.lc3.command.LunaChatCommand;
 import com.github.ucchyocean.lc3.command.LunaChatJapanizeCommand;
 import com.github.ucchyocean.lc3.command.LunaChatMessageCommand;
@@ -54,6 +56,7 @@ public class LunaChatBukkit extends JavaPlugin implements PluginInterface {
 
     private BukkitTask expireCheckerTask;
     private LunaChatLogger normalChatLogger;
+    private PaperIntegrationService integrationService;
 
     private LunaChatCommand lunachatCommand;
     private LunaChatMessageCommand messageCommand;
@@ -85,9 +88,23 @@ public class LunaChatBukkit extends JavaPlugin implements PluginInterface {
 
         // 変数などの初期化
         config = new LunaChatConfig(getDataFolder(), getFile());
+        try {
+            ChannelDataMigrator.migrate(getDataFolder());
+        } catch (java.io.IOException migrationFailure) {
+            getLogger().log(Level.SEVERE, "Channel data migration failed; refusing to start", migrationFailure);
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
         uuidCacheData = new UUIDCacheData(getDataFolder());
         Messages.initialize(new File(getDataFolder(), "messages"), getFile(), config.getLang());
         manager = new ChannelManager();
+        try {
+            integrationService = PaperIntegrationService.start(this, manager);
+        } catch (RuntimeException integrationFailure) {
+            getLogger().log(Level.SEVERE, "Integration API initialization failed; refusing to start", integrationFailure);
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
         normalChatLogger = new LunaChatLogger("==normalchat");
 
         // チャンネルチャット無効なら、デフォルト発言先をクリアする(see issue #59)
@@ -152,6 +169,8 @@ public class LunaChatBukkit extends JavaPlugin implements PluginInterface {
         if ( expireCheckerTask != null ) {
             expireCheckerTask.cancel();
         }
+        if ( integrationService != null ) integrationService.stop();
+        getServer().getMessenger().unregisterOutgoingPluginChannel(this);
     }
 
     /**

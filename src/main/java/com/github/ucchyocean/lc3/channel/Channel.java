@@ -36,6 +36,7 @@ import com.github.ucchyocean.lc3.util.ChatColor;
 import com.github.ucchyocean.lc3.util.ClickableFormat;
 import com.github.ucchyocean.lc3.util.Utility;
 import com.github.ucchyocean.lc3.util.YamlConfig;
+import com.github.ucchyocean.lunachat.api.ChannelId;
 
 import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.api.chat.TextComponent;
@@ -69,6 +70,10 @@ public abstract class Channel {
     private static final String KEY_MUTE_EXPIRES = "mute_expires";
     private static final String KEY_ALLOWCC = "allowcc";
     private static final String KEY_JAPANIZE = "japanize";
+    private static final String KEY_SCHEMA_VERSION = "schema_version";
+    private static final String KEY_CHANNEL_ID = "channel_id";
+    private static final String KEY_ACCEPTS_EXTERNAL = "accepts_external_messages";
+    private static final int DATA_SCHEMA_VERSION = 1;
 
     /** 参加者 */
     private List<ChannelMember> members;
@@ -87,6 +92,12 @@ public abstract class Channel {
 
     /** チャンネルの名称 */
     private String name;
+
+    /** renameで変化しない永続チャンネルID */
+    private ChannelId channelId;
+
+    /** integration APIからの外部投稿を許可するか */
+    private boolean acceptsExternalMessages;
 
     /** チャンネルの別名 */
     private String alias;
@@ -148,6 +159,8 @@ public abstract class Channel {
     protected Channel(String name) {
 
         this.name = name;
+        this.channelId = ChannelId.random();
+        this.acceptsExternalMessages = false;
         this.alias = "";
         this.description = "";
         this.members = new ArrayList<ChannelMember>();
@@ -868,6 +881,9 @@ public abstract class Channel {
     public Map<String, Object> serialize() {
 
         Map<String, Object> map = new HashMap<String, Object>();
+        map.put(KEY_SCHEMA_VERSION, DATA_SCHEMA_VERSION);
+        map.put(KEY_CHANNEL_ID, channelId.value());
+        map.put(KEY_ACCEPTS_EXTERNAL, acceptsExternalMessages);
         map.put(KEY_NAME, name);
         map.put(KEY_ALIAS, alias);
         map.put(KEY_DESC, description);
@@ -898,6 +914,11 @@ public abstract class Channel {
      */
     public static Channel deserialize(Map<String, Object> data) {
 
+        int schemaVersion = castWithDefault(data.get(KEY_SCHEMA_VERSION), 0);
+        if ( schemaVersion > DATA_SCHEMA_VERSION ) {
+            throw new IllegalArgumentException("Unsupported channel data schema " + schemaVersion);
+        }
+
         String name = castWithDefault(data.get(KEY_NAME), (String)null);
         if ( name == null ) {
             return null;
@@ -913,6 +934,9 @@ public abstract class Channel {
         }
 
         channel.alias = castWithDefault(data.get(KEY_ALIAS), "");
+        String persistedId = castWithDefault(data.get(KEY_CHANNEL_ID), (String)null);
+        if ( persistedId != null ) channel.channelId = new ChannelId(persistedId);
+        channel.acceptsExternalMessages = castWithDefault(data.get(KEY_ACCEPTS_EXTERNAL), false);
         channel.description = castWithDefault(data.get(KEY_DESC), "");
         channel.format = castWithDefault(data.get(KEY_FORMAT), channel.format);
         channel.members = castToChannelMemberList(data.get(KEY_MEMBERS));
@@ -939,6 +963,21 @@ public abstract class Channel {
      */
     public String getAlias() {
         return alias;
+    }
+
+    /** @return renameしても変化しない永続ID */
+    public ChannelId getChannelId() {
+        return channelId;
+    }
+
+    /** @return integration APIからの投稿を許可するか */
+    public boolean isAcceptsExternalMessages() {
+        return acceptsExternalMessages;
+    }
+
+    /** @param acceptsExternalMessages integration APIからの投稿可否 */
+    public void setAcceptsExternalMessages(boolean acceptsExternalMessages) {
+        this.acceptsExternalMessages = acceptsExternalMessages;
     }
 
     /**

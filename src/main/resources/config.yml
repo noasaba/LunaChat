@@ -116,6 +116,16 @@ defaultFormatForPrivateMessage: '&7[%player -> %to]&f %msg'
 # Reject longer lookup targets before calling the server profile API.
 maxPlayerNameLength: 16
 
+# Integration API runtime. Use standalone on one Paper server, or network_edge
+# when this Paper is connected to LunaChat-Velocity.
+integration:
+  role: standalone
+  serverId: paper-1
+  maxPending: 256
+  dedupCapacity: 4096
+  # Required only for network_edge. Generate 32 random bytes and encode as Base64.
+  sharedSecret: ''
+
 
 # -------------------- dynmap linkage setting --------------------
 

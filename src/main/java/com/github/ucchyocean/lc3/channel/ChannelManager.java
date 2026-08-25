@@ -20,6 +20,7 @@ import com.github.ucchyocean.lc3.event.EventResult;
 import com.github.ucchyocean.lc3.japanize.JapanizeType;
 import com.github.ucchyocean.lc3.member.ChannelMember;
 import com.github.ucchyocean.lc3.util.YamlConfig;
+import com.github.ucchyocean.lc3.integration.PaperIntegrationService;
 
 /**
  * チャンネルマネージャー
@@ -136,6 +137,8 @@ public class ChannelManager implements LunaChatAPI {
 
         // チャンネル設定のロード
         channels = Channel.loadAllChannels();
+        PaperIntegrationService integration = PaperIntegrationService.current();
+        if ( integration != null ) integration.refresh();
     }
 
     /**

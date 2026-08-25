@@ -73,6 +73,13 @@ public class LunaChatConfig {
     /** コマンドで検索可能なプレイヤー名の最大長 */
     private int maxPlayerNameLength;
 
+    /** Integration API runtime settings. */
+    private String integrationRole;
+    private String integrationServerId;
+    private int integrationMaxPending;
+    private int integrationDedupCapacity;
+    private String integrationSharedSecret;
+
     /** OPの画面に、全チャンネルの発言内容を表示するかどうか */
     private boolean opListenAllChannel;
 
@@ -230,6 +237,11 @@ public class LunaChatConfig {
                 "&7[%player -> %to]&f %msg");
         maxPlayerNameLength = Math.max(1,
                 config.getInt("maxPlayerNameLength", 16));
+        integrationRole = config.getString("integration.role", "standalone").toLowerCase();
+        integrationServerId = config.getString("integration.serverId", "paper-1");
+        integrationMaxPending = Math.max(1, config.getInt("integration.maxPending", 256));
+        integrationDedupCapacity = Math.max(1, config.getInt("integration.dedupCapacity", 4096));
+        integrationSharedSecret = config.getString("integration.sharedSecret", "").trim();
 
         opListenAllChannel = config.getBoolean("opListenAllChannel", false);
 
@@ -456,6 +468,12 @@ public class LunaChatConfig {
     public int getMaxPlayerNameLength() {
         return maxPlayerNameLength;
     }
+
+    public String getIntegrationRole() { return integrationRole; }
+    public String getIntegrationServerId() { return integrationServerId; }
+    public int getIntegrationMaxPending() { return integrationMaxPending; }
+    public int getIntegrationDedupCapacity() { return integrationDedupCapacity; }
+    public String getIntegrationSharedSecret() { return integrationSharedSecret; }
 
     /**
      * NGワード

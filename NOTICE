@@ -1,0 +1,17 @@
+LunaChat fork 4.x provenance notice
+===================================
+
+The original LunaChat source and its retained compatibility APIs are Copyright
+ucchy and contributors and remain licensed under GNU LGPL version 3 as stated
+in LICENSE and the source headers.
+
+The Integration API, secure network protocol, Velocity authority, Paper edge,
+migration, and their tests in this fork were implemented from the written
+requirements and public platform documentation. No LunaBridge implementation
+source was copied or moved into this repository. LunaBridge's GPLv3 delivery
+code therefore has no transferred files in this change. If code is transferred
+later, its copyright holders, exact commit/file provenance, and relicensing
+authority must be recorded here before merge.
+
+Protocol family LCN1 / wire version 1 is new and is not LunaBridge wire
+protocol v2.

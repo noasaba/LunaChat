@@ -23,6 +23,7 @@ import com.github.ucchyocean.lc3.bridge.DynmapBridge;
 import com.github.ucchyocean.lc3.event.EventResult;
 import com.github.ucchyocean.lc3.member.ChannelMember;
 import com.github.ucchyocean.lc3.member.ChannelMemberBukkit;
+import com.github.ucchyocean.lc3.integration.PaperIntegrationService;
 import com.github.ucchyocean.lc3.util.ClickableFormat;
 import com.github.ucchyocean.lc3.util.Utility;
 import com.github.ucchyocean.lc3.util.UtilityBukkit;
@@ -150,6 +151,9 @@ public class BukkitChannel extends Channel {
                 getName(), player, message, recipients, name, originalMessage);
         message = result.getMessage();
         recipients = result.getRecipients();
+
+        PaperIntegrationService integration = PaperIntegrationService.current();
+        if ( integration != null ) integration.accepted(this, player, message);
 
         // 通常ブロードキャストなら、設定に応じてdynmapへ送信する
         DynmapBridge dynmap = LunaChatBukkit.getInstance().getDynmap();

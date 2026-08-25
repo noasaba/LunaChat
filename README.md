@@ -18,9 +18,13 @@ http://sourceforge.jp/magazine/07/09/05/017211<br />
 対応環境
 --------
 
-- Paper / Spigot 26.2（Paper 26.2 の実行には Java 25 以上が必要です）
-- 従来環境とのバイナリ互換性を保つため、プラグイン本体は Java 8 bytecode で生成します
-- Multiverse-Core 4.x / 5.x および mcMMO の旧・新チャットAPIを自動判別します
+- LunaChat 4.0: Paper / Minecraft API 26.2、Velocity API 4.1.x、Java 25
+- 単体 Paper は standalone authority、Velocity 配下の Paper は network edge として動作
+- 従来の `com.github.ucchyocean.lc` / `lc3` API、コマンド、日本語変換、外部連携 API は削除・置換していません
+- Multiverse-Core 4.x / 5.x および mcMMO の旧・新チャット API を自動判別します
 
-3.0.17 では、上流 issue #218、#219、#221、#224、#229、#230、#231、#236
-で報告された不具合を取り込んでいます。Google IMEを含む既存の外部APIと公開APIは変更していません。
+ビルド成果物は `lunachat-paper/target/LunaChat.jar` と
+`lunachat-velocity/target/LunaChat-Velocity.jar` です。公開 Integration API は
+`lunachat-api`、実装非依存 TCK は `lunachat-api-testkit` に分離されています。
+
+設計、導入、upgrade 手順は [Integration API design](docs/integration-api.md) を参照してください。
