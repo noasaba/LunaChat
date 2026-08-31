@@ -9,9 +9,9 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -23,6 +23,8 @@ final class AuthorityChannelStore {
     private static final int SCHEMA = 1;
     private final Path file;
     private final Map<ChannelId, ChannelDescriptor> channels = new HashMap<>();
+    private final Map<String, Map<ChannelId, ChannelDescriptor>> proposalsByNode = new HashMap<>();
+    private boolean receivedFreshProposal;
 
     AuthorityChannelStore(Path directory) throws IOException {
         Files.createDirectories(directory);
@@ -34,9 +36,28 @@ final class AuthorityChannelStore {
         return channels.values().stream().sorted(java.util.Comparator.comparing(ChannelDescriptor::name)).toList();
     }
 
-    synchronized void applyProposal(List<ChannelDescriptor> proposal) throws IOException {
-        for (ChannelDescriptor channel : proposal) channels.put(channel.id(), channel);
+    synchronized void applyProposal(String sourceNode, List<ChannelDescriptor> proposal) throws IOException {
+        if (!receivedFreshProposal) {
+            proposalsByNode.clear();
+            receivedFreshProposal = true;
+        }
+        Map<ChannelId, ChannelDescriptor> replacement = new LinkedHashMap<>();
+        for (ChannelDescriptor channel : proposal) replacement.put(channel.id(), channel);
+        proposalsByNode.put(sourceNode, Map.copyOf(replacement));
+        rebuildFromFreshProposals();
         save();
+    }
+
+    synchronized void removeProposal(String sourceNode) throws IOException {
+        if (!receivedFreshProposal || proposalsByNode.remove(sourceNode) == null) return;
+        rebuildFromFreshProposals();
+        save();
+    }
+
+    private void rebuildFromFreshProposals() {
+        channels.clear();
+        proposalsByNode.entrySet().stream().sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> entry.getValue().values().forEach(channel -> channels.put(channel.id(), channel)));
     }
 
     private void load() throws IOException {

@@ -35,9 +35,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -55,6 +60,12 @@ class VelocityExternalPublishTest {
             harness.sent.clear();
 
             Instant created = Instant.now();
+            AtomicReference<AcceptedMessage> observed = new AtomicReference<>();
+            CountDownLatch observation = new CountDownLatch(1);
+            harness.authority.runtime().messages().observeAcceptedMessages(message -> {
+                observed.set(message);
+                observation.countDown();
+            });
             ExternalMessageRequest request = new ExternalMessageRequest(harness.channel.id(),
                     new ExternalMessageIdentity("lunabridge:discord", "discord-42"),
                     new MessageAuthor.External("lunabridge:discord", "user-7", "Noa"),
@@ -85,12 +96,70 @@ class VelocityExternalPublishTest {
             assertTrue(result.isDone(), "one Paper acceptance ACK completes external publish");
             assertEquals(PublishStatus.ACCEPTED, result.get().status());
             assertEquals(first.messageId(), result.get().messageId());
+            assertTrue(observation.await(2, TimeUnit.SECONDS));
+            assertEquals("aaaa-rendered-by-paper", observed.get().content(),
+                    "authority observers receive Paper-finalized content");
 
             harness.ack("backend-b", second);
             harness.sent.clear();
             harness.authority.tick();
             assertTrue(harness.sent.stream().noneMatch(frame -> frame.type() == FrameType.MESSAGE),
                     "ACKed logical messages are not retried");
+        }
+    }
+
+    @Test void receiptCapacityDoesNotAcknowledgeOrLoseNewMessages() throws Exception {
+        try (Harness harness = new Harness(1, 4)) {
+            harness.hello("backend-a");
+            harness.sent.clear();
+            harness.fillInboundReceipts(4);
+            AcceptedMessage second = harness.minecraftMessage("backend-a", "second");
+            harness.message("backend-a", second);
+            Thread.sleep(100L);
+            assertTrue(harness.sent.stream().noneMatch(frame -> frame.type() == FrameType.ACK),
+                    "a full authority must leave the source message retryable");
+        }
+    }
+
+    @Test void invalidAcknowledgementDoesNotRemoveRetryState() throws Exception {
+        try (Harness harness = new Harness(1)) {
+            harness.hello("backend-a");
+            harness.sent.clear();
+            ExternalMessageRequest request = new ExternalMessageRequest(harness.channel.id(),
+                    new ExternalMessageIdentity("lunabridge:discord", "invalid-ack"),
+                    new MessageAuthor.External("lunabridge:discord", "user", "User"),
+                    "hello", Instant.now(), Duration.ofMinutes(5));
+            CompletableFuture<ExternalPublishResult> result = harness.authority.runtime().messages()
+                    .publishExternal(request).toCompletableFuture();
+            harness.awaitDeliveries(1);
+            AcceptedMessage proposed = harness.messages.decode(harness.sent.stream()
+                    .filter(frame -> frame.type() == FrameType.MESSAGE).findFirst().orElseThrow().payload());
+            AcceptedMessage changed = new AcceptedMessage(proposed.messageId(), proposed.channelId(),
+                    proposed.channelName(), proposed.origin(),
+                    new MessageAuthor.External("lunabridge:discord", "changed", "Changed"),
+                    proposed.sourceServerId(), proposed.content(), proposed.createdAt(), proposed.expiresAt());
+
+            harness.ack("backend-a", changed);
+            assertFalse(result.isDone());
+            assertEquals(1, harness.outboxSize("backend-a"),
+                    "identity validation must happen before acknowledgement removal");
+        }
+    }
+
+    @Test void removedBackendDoesNotKeepExternalPublishPending() throws Exception {
+        try (Harness harness = new Harness(1)) {
+            harness.hello("backend-a");
+            ExternalMessageRequest request = new ExternalMessageRequest(harness.channel.id(),
+                    new ExternalMessageIdentity("lunabridge:discord", "removed-backend"),
+                    new MessageAuthor.External("lunabridge:discord", "user", "User"),
+                    "hello", Instant.now(), Duration.ofMinutes(5));
+            CompletableFuture<ExternalPublishResult> result = harness.authority.runtime().messages()
+                    .publishExternal(request).toCompletableFuture();
+            harness.awaitDeliveries(1);
+
+            harness.servers.clear();
+            harness.authority.tick();
+            assertEquals(PublishStatus.UNAVAILABLE, result.get(2, TimeUnit.SECONDS).status());
         }
     }
 
@@ -101,7 +170,7 @@ class VelocityExternalPublishTest {
                 new ReplayWindow(128), Clock.systemUTC());
         private final SecureFrameCodec outboundCodec = new SecureFrameCodec(1, SECRET,
                 new ReplayWindow(128), Clock.systemUTC());
-        private final List<SecureFrame> sent = new ArrayList<>();
+        private final List<SecureFrame> sent = new CopyOnWriteArrayList<>();
         private final ChannelMessageSink eventTarget = proxy(ChannelMessageSink.class,
                 (method, args) -> method.getName().startsWith("sendPluginMessage") ? true : defaultValue(method.getReturnType()));
         private final ProxyServer proxy;
@@ -110,10 +179,12 @@ class VelocityExternalPublishTest {
         private final List<RegisteredServer> servers;
         private final long epoch = 7L;
 
-        private Harness(int backendCount) throws Exception {
+        private Harness(int backendCount) throws Exception { this(backendCount, 128); }
+
+        private Harness(int backendCount, int receiptCapacity) throws Exception {
             directory = Files.createTempDirectory("lunachat-velocity-test");
             AuthorityChannelStore store = new AuthorityChannelStore(directory);
-            store.applyProposal(List.of(channel));
+            store.applyProposal("backend-a", List.of(channel));
             servers = new ArrayList<>();
             for (int i = 0; i < backendCount; i++) servers.add(server("backend-" + (char) ('a' + i)));
             proxy = proxy(ProxyServer.class, (method, args) -> switch (method.getName()) {
@@ -123,7 +194,7 @@ class VelocityExternalPublishTest {
                 default -> defaultValue(method.getReturnType());
             });
             authority = new VelocityNetworkAuthority(proxy, LoggerFactory.getLogger("VelocityExternalPublishTest"),
-                    CHANNEL, store, SECRET, 32, 128);
+                    CHANNEL, store, SECRET, 32, receiptCapacity);
         }
 
         private RegisteredServer server(String name) {
@@ -150,12 +221,48 @@ class VelocityExternalPublishTest {
             authority.handle(event(backend, ack));
         }
 
+        private void message(String backend, AcceptedMessage message) {
+            SecureFrame frame = new SecureFrame(1, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
+                    FrameType.MESSAGE, Instant.now(), Instant.now().plusSeconds(30), messages.encode(message));
+            authority.handle(event(backend, frame));
+        }
+
+        private AcceptedMessage minecraftMessage(String backend, String content) {
+            Instant now = Instant.now();
+            UUID id = UUID.randomUUID();
+            return new AcceptedMessage(id, channel.id(), channel.name(),
+                    new MessageOrigin(OriginKind.MINECRAFT, "lunachat.minecraft", id.toString()),
+                    new MessageAuthor.Player(UUID.randomUUID(), "player", "Player"), backend, content,
+                    now, now.plusSeconds(60));
+        }
+
         private void awaitDeliveries(int expected) throws InterruptedException {
             for (int attempt = 0; attempt < 100; attempt++) {
                 authority.tick();
                 long deliveries = sent.stream().filter(frame -> frame.type() == FrameType.MESSAGE).count();
                 if (deliveries >= expected) return;
                 Thread.sleep(5L);
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        private int outboxSize(String backend) throws Exception {
+            java.lang.reflect.Field field = VelocityNetworkAuthority.class.getDeclaredField("outboxes");
+            field.setAccessible(true);
+            Map<String, com.github.ucchyocean.lunachat.core.network.ReliableOutbox> outboxes =
+                    (Map<String, com.github.ucchyocean.lunachat.core.network.ReliableOutbox>) field.get(authority);
+            return outboxes.get(backend).size();
+        }
+
+        @SuppressWarnings("unchecked")
+        private void fillInboundReceipts(int count) throws Exception {
+            java.lang.reflect.Field field = VelocityNetworkAuthority.class.getDeclaredField("inboundReceipts");
+            field.setAccessible(true);
+            Map<UUID, Instant> receipts = (Map<UUID, Instant>) field.get(authority);
+            synchronized (authority) {
+                for (int index = 0; index < count; index++) {
+                    receipts.put(UUID.randomUUID(), Instant.now().plusSeconds(60));
+                }
             }
         }
 

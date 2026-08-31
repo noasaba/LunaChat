@@ -43,6 +43,11 @@ public final class ReliableOutbox {
         return List.copyOf(result);
     }
     public synchronized boolean acknowledge(UUID logicalId) { return entries.remove(logicalId) != null; }
+    public synchronized Optional<byte[]> payload(UUID logicalId, Instant now) {
+        purge(now);
+        Entry entry = entries.get(logicalId);
+        return entry == null ? Optional.empty() : Optional.of(Arrays.copyOf(entry.payload, entry.payload.length));
+    }
     public synchronized boolean contains(UUID logicalId, Instant now) { purge(now); return entries.containsKey(logicalId); }
     private void purge(Instant now) { entries.values().removeIf(entry -> !entry.expiresAt.isAfter(now) || entry.attempts >= maxAttempts); }
     public synchronized int size() { return entries.size(); }

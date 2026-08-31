@@ -35,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class VelocityNetworkAuthority implements AutoCloseable {
     private record Session(UUID id, long epoch) {}
     private record PendingExternal(AcceptedMessage message, CompletableFuture<AcceptedMessage> completion) {}
+    private enum LogicalAdmission { NEW, PENDING, DUPLICATE, FULL }
     private final ProxyServer proxy;
     private final Logger logger;
     private final ChannelIdentifier channel;
@@ -52,6 +53,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
      */
     private final Map<UUID, PendingExternal> pendingExternal = new ConcurrentHashMap<>();
     private final Map<UUID, Instant> inboundReceipts = new LinkedHashMap<>();
+    private final Map<UUID, Instant> inboundPending = new LinkedHashMap<>();
     private final AtomicLong sequence = new AtomicLong();
     private final int pendingCapacity;
     private final int receiptCapacity;
@@ -91,30 +93,51 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             }
             requireSession(sourceNode, frame);
             if (frame.type() == FrameType.STATE) {
-                store.applyProposal(channelStates.decode(frame.payload()));
+                store.applyProposal(sourceNode, channelStates.decode(frame.payload()));
                 directory.replace(store.snapshot());
             } else if (frame.type() == FrameType.MESSAGE && frame.logicalMessageId() != null) {
                 AcceptedMessage accepted = messages.decode(frame.payload());
                 if (!frame.logicalMessageId().equals(accepted.messageId()) || !sourceNode.equals(accepted.sourceServerId())) {
                     throw new FrameAuthenticationException("message identity mismatch");
                 }
-                boolean first = acceptLogical(accepted.messageId(), accepted.expiresAt());
-                if (first) {
-                    runtime.authorityGateway().accept(accepted);
-                    enqueueForOtherBackends(sourceNode, accepted);
+                LogicalAdmission admission = reserveLogical(accepted.messageId(), accepted.expiresAt());
+                if (admission == LogicalAdmission.DUPLICATE) {
+                    sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.ACK, accepted.messageId(),
+                            new byte[0], Instant.now().plusSeconds(30));
+                } else if (admission == LogicalAdmission.NEW) {
+                    runtime.authorityGateway().acceptAsync(accepted).whenComplete((admitted, failure) -> {
+                        if (failure == null && Boolean.TRUE.equals(admitted)
+                                && completeLogical(accepted.messageId(), accepted.expiresAt())) {
+                            enqueueForOtherBackends(sourceNode, accepted);
+                            sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.ACK, accepted.messageId(),
+                                    new byte[0], Instant.now().plusSeconds(30));
+                        } else {
+                            releaseLogical(accepted.messageId());
+                        }
+                    });
                 }
-                sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.ACK, accepted.messageId(),
-                        new byte[0], Instant.now().plusSeconds(30));
             } else if (frame.type() == FrameType.ACK && frame.logicalMessageId() != null) {
                 ReliableOutbox outbox = outboxes.get(sourceNode);
-                if (outbox != null) outbox.acknowledge(frame.logicalMessageId());
-                if (frame.payload().length > 0) {
-                    AcceptedMessage acknowledged = messages.decode(frame.payload());
-                    if (!frame.logicalMessageId().equals(acknowledged.messageId())) {
-                        throw new FrameAuthenticationException("acknowledgement identity mismatch");
+                byte[] proposedPayload = outbox == null ? null
+                        : outbox.payload(frame.logicalMessageId(), Instant.now()).orElse(null);
+                if (frame.payload().length == 0) {
+                    if (proposedPayload == null) return;
+                    AcceptedMessage proposed = messages.decode(proposedPayload);
+                    if (proposed.origin().kind() == com.github.ucchyocean.lunachat.api.OriginKind.EXTERNAL
+                            || pendingExternal.containsKey(frame.logicalMessageId())) {
+                        throw new FrameAuthenticationException("external acknowledgement payload is required");
                     }
-                    acknowledgeExternal(acknowledged);
+                    outbox.acknowledge(frame.logicalMessageId());
+                    return;
                 }
+                AcceptedMessage acknowledged = messages.decode(frame.payload());
+                if (!frame.logicalMessageId().equals(acknowledged.messageId())) {
+                    throw new FrameAuthenticationException("acknowledgement identity mismatch");
+                }
+                if (proposedPayload != null) validateStableIdentity(messages.decode(proposedPayload), acknowledged);
+                PendingExternal pending = validateExternalAcknowledgement(acknowledged);
+                if (outbox != null) outbox.acknowledge(frame.logicalMessageId());
+                completeExternalAcknowledgement(pending, acknowledged);
             }
         } catch (ReplayFrameException replay) {
             logger.debug("Discarded replayed LunaChat frame from {}", sourceNode);
@@ -146,23 +169,31 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         return completion;
     }
 
-    /** Completes the API admission only after a Paper edge's accepted ACK. */
-    private void acknowledgeExternal(AcceptedMessage acknowledged) throws FrameAuthenticationException {
+    private PendingExternal validateExternalAcknowledgement(AcceptedMessage acknowledged)
+            throws FrameAuthenticationException {
         PendingExternal pending = pendingExternal.get(acknowledged.messageId());
+        if (pending != null) validateStableIdentity(pending.message(), acknowledged);
+        return pending;
+    }
+
+    /** Completes API admission with the content finalized by the accepting Paper. */
+    private void completeExternalAcknowledgement(PendingExternal pending, AcceptedMessage acknowledged) {
         if (pending == null) return;
-        AcceptedMessage proposed = pending.message();
-        if (!proposed.channelId().equals(acknowledged.channelId())
+        if (pendingExternal.remove(acknowledged.messageId(), pending)) {
+            pending.completion().complete(acknowledged);
+        }
+    }
+
+    private static void validateStableIdentity(AcceptedMessage proposed, AcceptedMessage acknowledged)
+            throws FrameAuthenticationException {
+        if (!proposed.messageId().equals(acknowledged.messageId())
+                || !proposed.channelId().equals(acknowledged.channelId())
                 || !proposed.origin().equals(acknowledged.origin())
                 || !proposed.author().equals(acknowledged.author())
                 || !proposed.sourceServerId().equals(acknowledged.sourceServerId())
                 || !proposed.createdAt().equals(acknowledged.createdAt())
                 || !proposed.expiresAt().equals(acknowledged.expiresAt())) {
-            throw new FrameAuthenticationException("external acknowledgement changed message identity");
-        }
-        if (pendingExternal.remove(acknowledged.messageId(), pending)) {
-            // The authority's canonical content remains authoritative.  The
-            // Paper ACK is the acceptance signal, not a content replacement.
-            pending.completion().complete(proposed);
+            throw new FrameAuthenticationException("acknowledgement changed message identity");
         }
     }
 
@@ -179,8 +210,20 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     void tick() {
         Instant now = Instant.now();
-        proxy.getAllServers().forEach(server -> outboxes.computeIfAbsent(server.getServerInfo().getName(),
+        java.util.Set<String> activeNodes = proxy.getAllServers().stream()
+                .map(server -> server.getServerInfo().getName()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        activeNodes.forEach(node -> outboxes.computeIfAbsent(node,
                 ignored -> new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
+        outboxes.keySet().stream().filter(node -> !activeNodes.contains(node)).toList().forEach(node -> {
+            outboxes.remove(node);
+            sessions.remove(node);
+            try {
+                store.removeProposal(node);
+            } catch (IOException failure) {
+                logger.error("Could not remove stale LunaChat channel proposal for {}", node, failure);
+            }
+        });
+        directory.replace(store.snapshot());
         pendingExternal.forEach((messageId, pending) -> {
             boolean queued = outboxes.values().stream().anyMatch(outbox -> outbox.contains(messageId, now));
             if ((!pending.message().expiresAt().isAfter(now) || !queued)
@@ -190,6 +233,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         });
         synchronized (this) {
             inboundReceipts.values().removeIf(expiry -> !expiry.isAfter(now));
+            inboundPending.values().removeIf(expiry -> !expiry.isAfter(now));
         }
         outboxes.forEach((node, outbox) -> {
             Session session = sessions.get(node);
@@ -200,13 +244,25 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         });
     }
 
-    private synchronized boolean acceptLogical(UUID logicalId, Instant expiry) {
+    private synchronized LogicalAdmission reserveLogical(UUID logicalId, Instant expiry) {
         Instant now = Instant.now();
         inboundReceipts.values().removeIf(value -> !value.isAfter(now));
-        if (inboundReceipts.containsKey(logicalId)) return false;
-        if (inboundReceipts.size() >= receiptCapacity) return false;
+        inboundPending.values().removeIf(value -> !value.isAfter(now));
+        if (inboundReceipts.containsKey(logicalId)) return LogicalAdmission.DUPLICATE;
+        if (inboundPending.containsKey(logicalId)) return LogicalAdmission.PENDING;
+        if (inboundReceipts.size() + inboundPending.size() >= receiptCapacity) return LogicalAdmission.FULL;
+        inboundPending.put(logicalId, expiry);
+        return LogicalAdmission.NEW;
+    }
+
+    private synchronized boolean completeLogical(UUID logicalId, Instant expiry) {
+        if (inboundPending.remove(logicalId) == null || !expiry.isAfter(Instant.now())) return false;
         inboundReceipts.put(logicalId, expiry.plus(Duration.ofMinutes(5)));
         return true;
+    }
+
+    private synchronized void releaseLogical(UUID logicalId) {
+        inboundPending.remove(logicalId);
     }
 
     private void requireSession(String node, SecureFrame frame) throws FrameAuthenticationException {

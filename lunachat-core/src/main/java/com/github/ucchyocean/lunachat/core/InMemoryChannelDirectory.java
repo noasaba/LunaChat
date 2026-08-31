@@ -4,22 +4,41 @@ import com.github.ucchyocean.lunachat.api.ChannelDescriptor;
 import com.github.ucchyocean.lunachat.api.ChannelId;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class InMemoryChannelDirectory implements ChannelDirectory {
-    private final ConcurrentHashMap<ChannelId, ChannelDescriptor> channels = new ConcurrentHashMap<>();
+    private final AtomicReference<Map<ChannelId, ChannelDescriptor>> channels =
+            new AtomicReference<>(Map.of());
 
     public void replace(Collection<ChannelDescriptor> descriptors) {
-        channels.clear();
-        descriptors.forEach(descriptor -> channels.put(descriptor.id(), descriptor));
+        HashMap<ChannelId, ChannelDescriptor> replacement = new HashMap<>();
+        descriptors.forEach(descriptor -> replacement.put(descriptor.id(), descriptor));
+        channels.set(Map.copyOf(replacement));
     }
 
-    public void put(ChannelDescriptor descriptor) { channels.put(descriptor.id(), descriptor); }
-    public void remove(ChannelId id) { channels.remove(id); }
-    @Override public Optional<ChannelDescriptor> find(ChannelId id) { return Optional.ofNullable(channels.get(id)); }
+    public void put(ChannelDescriptor descriptor) {
+        channels.updateAndGet(current -> {
+            HashMap<ChannelId, ChannelDescriptor> replacement = new HashMap<>(current);
+            replacement.put(descriptor.id(), descriptor);
+            return Map.copyOf(replacement);
+        });
+    }
+    public void remove(ChannelId id) {
+        channels.updateAndGet(current -> {
+            if (!current.containsKey(id)) return current;
+            HashMap<ChannelId, ChannelDescriptor> replacement = new HashMap<>(current);
+            replacement.remove(id);
+            return Map.copyOf(replacement);
+        });
+    }
+    @Override public Optional<ChannelDescriptor> find(ChannelId id) {
+        return Optional.ofNullable(channels.get().get(id));
+    }
 
     @Override public Optional<ChannelDescriptor> findByNameOrAlias(String value) {
         if (value == null || value.isBlank()) return Optional.empty();
@@ -29,6 +48,7 @@ public final class InMemoryChannelDirectory implements ChannelDirectory {
     }
 
     @Override public List<ChannelDescriptor> snapshot() {
-        return channels.values().stream().sorted(Comparator.comparing(channel -> channel.id().value())).toList();
+        return channels.get().values().stream()
+                .sorted(Comparator.comparing(channel -> channel.id().value())).toList();
     }
 }

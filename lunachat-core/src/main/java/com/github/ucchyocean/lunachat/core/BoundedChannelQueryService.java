@@ -35,7 +35,9 @@ public final class BoundedChannelQueryService implements ChannelQueryService {
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.US_ASCII);
             if (!decoded.startsWith("v1:")) throw new IllegalArgumentException("unsupported cursor");
-            return Integer.parseInt(decoded.substring(3));
+            int offset = Integer.parseInt(decoded.substring(3));
+            if (offset < 0) throw new IllegalArgumentException("negative cursor offset");
+            return offset;
         } catch (IllegalArgumentException error) {
             throw new IllegalArgumentException("invalid opaque cursor", error);
         }

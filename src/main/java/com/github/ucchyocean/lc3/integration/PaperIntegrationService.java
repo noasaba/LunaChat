@@ -85,7 +85,7 @@ public final class PaperIntegrationService {
                 completion.complete(null);
                 return;
             }
-            boolean preserveCanonicalContent = runtime.runtimeRole() == RuntimeRole.NETWORK_EDGE;
+            boolean preserveCanonicalContent = preservesCanonicalContent(runtime.runtimeRole(), proposed.origin().kind());
             if (preserveCanonicalContent) canonicalRender.set(Boolean.TRUE);
             else externalCall.set(new Pending(proposed, completion));
             try {
@@ -112,6 +112,15 @@ public final class PaperIntegrationService {
     /** External namespaces identify integrations; they are not chat display suffixes. */
     static String displaySourceFor(AcceptedMessage message) {
         return message.origin().kind() == OriginKind.EXTERNAL ? null : message.origin().namespace();
+    }
+
+    /**
+     * Minecraft/system messages arriving at an edge were finalized by their
+     * source Paper. External messages originate at Velocity and therefore must
+     * pass through one Paper's LunaChat filters and events before acknowledgement.
+     */
+    static boolean preservesCanonicalContent(RuntimeRole role, OriginKind origin) {
+        return role == RuntimeRole.NETWORK_EDGE && origin != OriginKind.EXTERNAL;
     }
 
     private static AcceptedMessage withContent(AcceptedMessage proposed, String content) {

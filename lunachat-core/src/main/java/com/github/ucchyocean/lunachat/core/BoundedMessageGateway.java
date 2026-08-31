@@ -116,7 +116,8 @@ public final class BoundedMessageGateway implements MessageGateway, AutoCloseabl
             result.complete(ExternalPublishResult.rejected(PublishStatus.FORBIDDEN, false, "EXTERNAL_DISABLED"));
             return;
         }
-        if (externalReceipts.size() + pendingPublishes.size() >= maxReceipts) {
+        if (externalReceipts.size() + pendingPublishes.size() >= maxReceipts
+                || observedLogicalIds.size() + pendingPublishes.size() >= maxReceipts) {
             result.complete(ExternalPublishResult.rejected(PublishStatus.OVER_CAPACITY, true, "DEDUP_FULL"));
             return;
         }
@@ -125,9 +126,19 @@ public final class BoundedMessageGateway implements MessageGateway, AutoCloseabl
                 new MessageOrigin(OriginKind.EXTERNAL, request.identity().namespace(), request.identity().value()),
                 request.author(), sourceServerId, request.content(), request.createdAt(), expiresAt);
         pendingPublishes.put(request.identity(), new PendingPublish(logicalId, result));
-        sink.commit(accepted).whenComplete((finalMessage, error) -> {
-            completeCommit(request.identity(), accepted, finalMessage, error, result);
-        });
+        CompletionStage<AcceptedMessage> commit;
+        try {
+            commit = Objects.requireNonNull(sink.commit(accepted), "delivery sink returned null");
+        } catch (RuntimeException failure) {
+            completeCommit(request.identity(), accepted, null, failure, result);
+            return;
+        }
+        try {
+            commit.whenComplete((finalMessage, error) ->
+                    completeCommit(request.identity(), accepted, finalMessage, error, result));
+        } catch (RuntimeException failure) {
+            completeCommit(request.identity(), accepted, null, failure, result);
+        }
     }
 
     private synchronized void completeCommit(ExternalMessageIdentity identity, AcceptedMessage accepted,
@@ -143,7 +154,11 @@ public final class BoundedMessageGateway implements MessageGateway, AutoCloseabl
         }
         if (!accepted.messageId().equals(finalMessage.messageId())
                 || !accepted.channelId().equals(finalMessage.channelId())
-                || !accepted.origin().equals(finalMessage.origin())) {
+                || !accepted.origin().equals(finalMessage.origin())
+                || !accepted.author().equals(finalMessage.author())
+                || !accepted.sourceServerId().equals(finalMessage.sourceServerId())
+                || accepted.createdAt().toEpochMilli() != finalMessage.createdAt().toEpochMilli()
+                || accepted.expiresAt().toEpochMilli() != finalMessage.expiresAt().toEpochMilli()) {
             result.complete(ExternalPublishResult.rejected(PublishStatus.INVALID, false, "SINK_CHANGED_IDENTITY"));
             return;
         }
@@ -154,17 +169,39 @@ public final class BoundedMessageGateway implements MessageGateway, AutoCloseabl
 
     /** Called at the final LunaChat acceptance boundary for Minecraft/system messages. */
     public boolean accept(AcceptedMessage message) {
+        Objects.requireNonNull(message, "message");
         if (closed.get()) return false;
         try { admission.execute(() -> acceptOnAdmissionThread(message)); }
         catch (RejectedExecutionException full) { return false; }
         return true;
     }
 
+    /**
+     * Reports actual receipt admission rather than merely executor admission.
+     * Network transports use this before acknowledging their source.
+     */
+    public CompletionStage<Boolean> acceptAsync(AcceptedMessage message) {
+        Objects.requireNonNull(message, "message");
+        CompletableFuture<Boolean> result = new CompletableFuture<>();
+        if (closed.get()) {
+            result.complete(false);
+            return result;
+        }
+        try {
+            admission.execute(() -> {
+                try { result.complete(acceptOnAdmissionThread(message)); }
+                catch (RuntimeException failure) { result.completeExceptionally(failure); }
+            });
+        }
+        catch (RejectedExecutionException full) { result.complete(false); }
+        return result;
+    }
+
     private synchronized boolean acceptOnAdmissionThread(AcceptedMessage message) {
         Instant now = clock.instant();
         purge(now);
         if (observedLogicalIds.containsKey(message.messageId())) return false;
-        if (observedLogicalIds.size() >= maxReceipts) return false;
+        if (observedLogicalIds.size() + pendingPublishes.size() >= maxReceipts) return false;
         observedLogicalIds.put(message.messageId(), message.expiresAt().plus(Duration.ofMinutes(5)));
         for (AcceptedMessageListener listener : listeners) {
             try { observers.execute(() -> { try { listener.onAccepted(message); } catch (RuntimeException ignored) {} }); }

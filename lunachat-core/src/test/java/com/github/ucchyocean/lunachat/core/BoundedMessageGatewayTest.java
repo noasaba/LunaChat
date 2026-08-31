@@ -105,6 +105,40 @@ class BoundedMessageGatewayTest {
         gateway.close();
     }
 
+    @Test void synchronousSinkFailureCompletesAndReleasesPendingIdentity() throws Exception {
+        InMemoryChannelDirectory directory = new InMemoryChannelDirectory(); directory.put(CHANNEL);
+        AtomicInteger commits = new AtomicInteger();
+        BoundedMessageGateway gateway = new BoundedMessageGateway(directory, message -> {
+            commits.incrementAndGet();
+            throw new IllegalStateException("synchronous failure");
+        }, Clock.fixed(NOW, ZoneOffset.UTC), "paper-1", 4, 4);
+
+        ExternalMessageRequest request = request("sync-failure", NOW);
+        assertEquals(PublishStatus.UNAVAILABLE,
+                gateway.publishExternal(request).toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+        assertEquals(PublishStatus.UNAVAILABLE,
+                gateway.publishExternal(request).toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+        assertEquals(2, commits.get(), "a failed identity must not remain stuck in pending state");
+        gateway.close();
+    }
+
+    @Test void sinkCannotChangeStableMessageIdentity() throws Exception {
+        InMemoryChannelDirectory directory = new InMemoryChannelDirectory(); directory.put(CHANNEL);
+        BoundedMessageGateway gateway = new BoundedMessageGateway(directory, message ->
+                CompletableFuture.completedFuture(new AcceptedMessage(message.messageId(), message.channelId(),
+                        message.channelName(), message.origin(),
+                        new MessageAuthor.External("lunabridge.discord", "changed", "Changed"),
+                        "other-server", message.content(), message.createdAt().plusSeconds(1),
+                        message.expiresAt().plusSeconds(1))),
+                Clock.fixed(NOW, ZoneOffset.UTC), "paper-1", 4, 4);
+
+        ExternalPublishResult result = gateway.publishExternal(request("changed-identity", NOW))
+                .toCompletableFuture().get(2, TimeUnit.SECONDS);
+        assertEquals(PublishStatus.INVALID, result.status());
+        assertEquals("SINK_CHANGED_IDENTITY", result.diagnosticCode());
+        gateway.close();
+    }
+
     private static ExternalMessageRequest request(String id, Instant created) {
         return new ExternalMessageRequest(CHANNEL.id(), new ExternalMessageIdentity("lunabridge.discord", id),
                 new MessageAuthor.External("lunabridge.discord", "user", "User"), "hello", created, Duration.ofMinutes(1));

@@ -35,4 +35,15 @@ public class PaperIntegrationServiceTest {
         assertEquals("lunachat.minecraft", PaperIntegrationService.displaySourceFor(player));
         assertEquals("lunachat.system", PaperIntegrationService.displaySourceFor(system));
     }
+
+    @Test public void networkExternalMessagesAreFinalizedByPaperExactlyOnce() {
+        assertEquals(false, PaperIntegrationService.preservesCanonicalContent(
+                com.github.ucchyocean.lunachat.api.RuntimeRole.NETWORK_EDGE, OriginKind.EXTERNAL));
+        assertEquals(true, PaperIntegrationService.preservesCanonicalContent(
+                com.github.ucchyocean.lunachat.api.RuntimeRole.NETWORK_EDGE, OriginKind.MINECRAFT));
+        assertEquals(true, PaperIntegrationService.preservesCanonicalContent(
+                com.github.ucchyocean.lunachat.api.RuntimeRole.NETWORK_EDGE, OriginKind.SYSTEM));
+        assertEquals(false, PaperIntegrationService.preservesCanonicalContent(
+                com.github.ucchyocean.lunachat.api.RuntimeRole.STANDALONE_AUTHORITY, OriginKind.EXTERNAL));
+    }
 }
