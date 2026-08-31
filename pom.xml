@@ -32,7 +32,7 @@
     <maven.compiler.release>25</maven.compiler.release>
     <lunachat.product.version>4.0.0-SNAPSHOT</lunachat.product.version>
     <lunachat.api.version>1.0.0-SNAPSHOT</lunachat.api.version>
-    <lunachat.wire.version>1</lunachat.wire.version>
+    <lunachat.wire.version>2</lunachat.wire.version>
     <lunachat.config.schema>1</lunachat.config.schema>
     <lunachat.data.schema>1</lunachat.data.schema>
     <junit.version>5.13.4</junit.version>

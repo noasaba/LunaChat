@@ -51,7 +51,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class VelocityExternalPublishTest {
     private static final byte[] SECRET = "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
     private static final ChannelIdentifier CHANNEL = proxy(ChannelIdentifier.class,
-            (method, args) -> method.getName().equals("getId") ? "lunachat:network_v1" : defaultValue(method.getReturnType()));
+            (method, args) -> method.getName().equals("getId") ? "lunachat:network_v2" : defaultValue(method.getReturnType()));
+
+    @Test void authorityAssignsIdentityFromActualVelocityConnection() throws Exception {
+        try (Harness harness = new Harness(1)) {
+            harness.helloClaiming("backend-a", "spoofed-name");
+
+            SecureFrame ready = harness.sent.stream()
+                    .filter(frame -> frame.type() == FrameType.READY).findFirst().orElseThrow();
+            assertEquals("backend-a", new String(ready.payload(), StandardCharsets.UTF_8));
+        }
+    }
 
     @Test void externalPublishCompletesAfterCanonicalPaperAcksAndSuppressesRetry() throws Exception {
         try (Harness harness = new Harness(2)) {
@@ -94,7 +104,7 @@ class VelocityExternalPublishTest {
                     "aaaa-rendered-by-paper", first.createdAt(), first.expiresAt());
             harness.ack("backend-a", renderedByPaper);
             assertTrue(result.isDone(), "one Paper acceptance ACK completes external publish");
-            assertEquals(PublishStatus.ACCEPTED, result.get().status());
+            assertEquals(PublishStatus.ACCEPTED, result.get().status(), result.get().toString());
             assertEquals(first.messageId(), result.get().messageId());
             assertTrue(observation.await(2, TimeUnit.SECONDS));
             assertEquals("aaaa-rendered-by-paper", observed.get().content(),
@@ -166,9 +176,9 @@ class VelocityExternalPublishTest {
     private static final class Harness implements AutoCloseable {
         private final ChannelDescriptor channel = new ChannelDescriptor(ChannelId.random(), "global", java.util.Set.of(), true);
         private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
-        private final SecureFrameCodec inboundCodec = new SecureFrameCodec(1, SECRET,
+        private final SecureFrameCodec inboundCodec = new SecureFrameCodec(2, SECRET,
                 new ReplayWindow(128), Clock.systemUTC());
-        private final SecureFrameCodec outboundCodec = new SecureFrameCodec(1, SECRET,
+        private final SecureFrameCodec outboundCodec = new SecureFrameCodec(2, SECRET,
                 new ReplayWindow(128), Clock.systemUTC());
         private final List<SecureFrame> sent = new CopyOnWriteArrayList<>();
         private final ChannelMessageSink eventTarget = proxy(ChannelMessageSink.class,
@@ -210,19 +220,24 @@ class VelocityExternalPublishTest {
         }
 
         private void hello(String backend) {
-            SecureFrame hello = new SecureFrame(1, session(backend), epoch, 1, UUID.randomUUID(), null,
-                    FrameType.HELLO, Instant.now(), Instant.now().plusSeconds(30), backend.getBytes(StandardCharsets.UTF_8));
+            helloClaiming(backend, "");
+        }
+
+        private void helloClaiming(String backend, String claimedIdentity) {
+            SecureFrame hello = new SecureFrame(2, session(backend), epoch, 1, UUID.randomUUID(), null,
+                    FrameType.HELLO, Instant.now(), Instant.now().plusSeconds(30),
+                    claimedIdentity.getBytes(StandardCharsets.UTF_8));
             authority.handle(event(backend, hello));
         }
 
         private void ack(String backend, AcceptedMessage message) {
-            SecureFrame ack = new SecureFrame(1, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
+            SecureFrame ack = new SecureFrame(2, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
                     FrameType.ACK, Instant.now(), Instant.now().plusSeconds(30), messages.encode(message));
             authority.handle(event(backend, ack));
         }
 
         private void message(String backend, AcceptedMessage message) {
-            SecureFrame frame = new SecureFrame(1, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
+            SecureFrame frame = new SecureFrame(2, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
                     FrameType.MESSAGE, Instant.now(), Instant.now().plusSeconds(30), messages.encode(message));
             authority.handle(event(backend, frame));
         }

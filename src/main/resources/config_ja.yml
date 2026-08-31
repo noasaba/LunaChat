@@ -117,15 +117,12 @@ defaultFormatForPrivateMessage: '&7[%player -> %to]&f %msg'
 # サーバーのプロフィール検索を行う前に拒否するプレイヤー名の最大文字数。
 maxPlayerNameLength: 16
 
-# Integration API実行モード。Paper単体はstandalone、
-# LunaChat-Velocity配下のPaperはnetwork_edgeを指定します。
+# Paper単体ではsharePassを空にします。ネットワーク構成ではPaperとVelocityへ
+# 同じ共有パスフレーズを設定します。サーバーIDはVelocityが自動割り当てします。
 integration:
-  role: standalone
-  serverId: paper-1
+  sharePass: ''
   maxPending: 256
   dedupCapacity: 4096
-  # network_edge の場合のみ必須。32 byte の乱数を Base64 化して指定します。
-  sharedSecret: ''
 
 
 # -------------------- dynmap連携設定 --------------------

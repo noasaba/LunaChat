@@ -68,7 +68,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         this.pendingCapacity = pendingCapacity;
         this.receiptCapacity = receiptCapacity;
         directory.replace(store.snapshot());
-        secure = new SecureFrameCodec(1, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
+        secure = new SecureFrameCodec(2, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
         proxy.getAllServers().forEach(server -> outboxes.put(server.getServerInfo().getName(),
                 new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
         runtime = IntegrationRuntime.authority(RuntimeRole.NETWORK_AUTHORITY, directory, this::commitExternal,
@@ -84,8 +84,6 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         try {
             SecureFrame frame = secure.decode(event.getData());
             if (frame.type() == FrameType.HELLO) {
-                String claimedNode = new String(frame.payload(), StandardCharsets.UTF_8);
-                if (!sourceNode.equals(claimedNode)) throw new FrameAuthenticationException("backend identity mismatch");
                 sessions.put(sourceNode, new Session(frame.sessionId(), frame.epoch()));
                 sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.READY, null,
                         sourceNode.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(10));
@@ -147,7 +145,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         }
     }
 
-    private CompletableFuture<AcceptedMessage> commitExternal(AcceptedMessage message) {
+    private synchronized CompletableFuture<AcceptedMessage> commitExternal(AcceptedMessage message) {
         AcceptedMessage canonical = messages.canonicalize(message);
         CompletableFuture<AcceptedMessage> completion = new CompletableFuture<>();
         PendingExternal pending = new PendingExternal(canonical, completion);
@@ -224,13 +222,15 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             }
         });
         directory.replace(store.snapshot());
-        pendingExternal.forEach((messageId, pending) -> {
-            boolean queued = outboxes.values().stream().anyMatch(outbox -> outbox.contains(messageId, now));
-            if ((!pending.message().expiresAt().isAfter(now) || !queued)
-                    && pendingExternal.remove(messageId, pending)) {
-                pending.completion().complete(null);
-            }
-        });
+        synchronized (this) {
+            pendingExternal.forEach((messageId, pending) -> {
+                boolean queued = outboxes.values().stream().anyMatch(outbox -> outbox.contains(messageId, now));
+                if ((!pending.message().expiresAt().isAfter(now) || !queued)
+                        && pendingExternal.remove(messageId, pending)) {
+                    pending.completion().complete(null);
+                }
+            });
+        }
         synchronized (this) {
             inboundReceipts.values().removeIf(expiry -> !expiry.isAfter(now));
             inboundPending.values().removeIf(expiry -> !expiry.isAfter(now));
@@ -273,14 +273,14 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     private void sendAttempt(String node, Session session, ReliableOutbox.Attempt attempt) {
-        SecureFrame frame = new SecureFrame(1, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
+        SecureFrame frame = new SecureFrame(2, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
                 attempt.logicalMessageId(), FrameType.MESSAGE, Instant.now(), attempt.expiresAt(), attempt.payload());
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }
 
     private void sendNow(String node, UUID sessionId, long epoch, FrameType type, UUID logicalId,
             byte[] payload, Instant expiresAt) {
-        SecureFrame frame = new SecureFrame(1, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
+        SecureFrame frame = new SecureFrame(2, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
                 logicalId, type, Instant.now(), expiresAt, payload);
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }

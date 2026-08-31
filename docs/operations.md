@@ -2,17 +2,23 @@
 
 ## Standalone Paper
 
-Install `LunaChat.jar`, leave `integration.role: standalone`, assign a stable
-`serverId`, and explicitly enable `accepts_external_messages` only on intended
-channel YAML entries. Install one standalone LunaBridge consumer on that Paper.
+Install `LunaChat.jar`, leave `integration.sharePass` empty, and explicitly
+enable `accepts_external_messages` only on intended channel YAML entries.
+Install one standalone LunaBridge consumer on that Paper.
 
 ## Velocity network
 
-Install `LunaChat-Velocity.jar` on Velocity and start it once. It creates
-`plugins/lunachat/network.properties` with a random secret. Copy that Base64
-value into every Paper's `integration.sharedSecret`, set `role: network_edge`,
-and set `serverId` exactly equal to its Velocity registered-server name. Install
-`LunaChat.jar` on each Paper. Install LunaBridge only on Velocity.
+Install `LunaChat-Velocity.jar` on Velocity and set `sharePass` in
+`plugins/lunachat/network.properties`. Put the same value in every Paper's
+`integration.sharePass`. A non-empty passphrase automatically selects network
+edge mode; Velocity assigns each Paper its registered-server identity during
+the authenticated HELLO/READY exchange. No `role`, `serverId`, or Base64 key is
+required. Install `LunaChat.jar` on each Paper and LunaBridge only on Velocity.
+
+Use a unique passphrase of at least 12 characters. LunaChat derives the actual
+256-bit key with PBKDF2-HMAC-SHA256. Legacy `sharedSecret`, `role`, and
+`serverId` settings remain readable for rollback and migration, but are not
+written into new configurations.
 
 Do not combine standalone and network bridge modes. A bridge must check role and
 capabilities and refuse to start on `NETWORK_EDGE`.
@@ -23,13 +29,13 @@ capabilities and refuse to start on `NETWORK_EDGE`.
 - Velocity/transport down: Paper local rendering continues; edge network status
   becomes `UNAVAILABLE`; cross-backend and integration work is not reported as success.
 - Paper down: other backends and the Velocity API continue; its bounded outbox expires.
-- Secret mismatch/tamper/protocol/session mismatch: warning plus session removal.
+- Passphrase mismatch/tamper/protocol/session mismatch: warning plus session removal.
 - Replay: debug/fine discard, session retained.
 - Queue/dedup full: explicit `OVER_CAPACITY` or warning; no unbounded growth.
 - Observer failure: isolated and never fails chat delivery.
 
 Monitor rejected frame counts, outbox-full warnings, API status/result codes,
-and migration errors. Rotate a secret as a coordinated outage: stop edges,
+and migration errors. Rotate a passphrase as a coordinated outage: stop edges,
 replace Velocity and every Paper value, then restart Velocity before Papers.
 
 ## Upgrade and rollback

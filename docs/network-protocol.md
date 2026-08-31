@@ -1,18 +1,20 @@
-# LCN1 network protocol
+# LCN2 network protocol
 
-LCN1 is an internal LunaChat protocol, independent of LunaBridge protocol v2.
-Wire version 1 runs on `lunachat:network_v1` and has separate logical and secure
+LCN2 is an internal LunaChat protocol, independent of LunaBridge.
+Wire version 2 runs on `lunachat:network_v2` and has separate logical and secure
 frame identities.
 
 Each secure frame authenticates protocol, session UUID, startup epoch,
 sequence, fresh frame UUID, optional logical UUID, frame type, timestamps, and
-payload with AES-256-GCM. A SHA-256-derived key is made from a minimum 32-byte
-shared secret. Every encryption uses a random 96-bit nonce. Retry preserves the
+payload with AES-256-GCM. The operator's shared passphrase is converted to a
+256-bit key with PBKDF2-HMAC-SHA256; legacy 32-byte shared secrets remain
+readable during migration. Every encryption uses a random 96-bit nonce. Retry preserves the
 logical UUID but creates a new frame UUID, sequence and nonce.
 
-An authenticated `HELLO(nodeId)` starts/replaces a backend session. Velocity
-accepts it only from a `ServerConnection` whose registered server name equals
-the node ID, then returns `READY`. Paper repeats HELLO periodically as a
+An authenticated `HELLO` starts or replaces a backend session without trusting
+a Paper-supplied identity. Velocity derives the node ID from the actual
+`ServerConnection` and returns it in `READY(nodeId)`. Paper adopts that assigned
+identity for later messages. Paper repeats HELLO periodically as a
 bounded heartbeat, so a carrier reconnect or a Velocity restart converges back
 to READY. All later frames must match that session and epoch. Paper sends a
 bounded channel `STATE` proposal after READY. Velocity durably applies valid

@@ -12,6 +12,7 @@ import com.github.ucchyocean.lunachat.core.network.ReplayWindow;
 import com.github.ucchyocean.lunachat.core.network.ReplayFrameException;
 import com.github.ucchyocean.lunachat.core.network.SecureFrame;
 import com.github.ucchyocean.lunachat.core.network.SecureFrameCodec;
+import com.github.ucchyocean.lunachat.core.network.SharedPassphrase;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.messaging.PluginMessageListener;
@@ -31,11 +32,11 @@ import java.util.concurrent.CompletableFuture;
 
 /** Authenticated, bounded Paper edge. Local chat never depends on this transport. */
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
-    static final String CHANNEL = "lunachat:network_v1";
-    private static final int PROTOCOL = 1;
+    static final String CHANNEL = "lunachat:network_v2";
+    private static final int PROTOCOL = 2;
     private final LunaChatBukkit plugin;
     private final PaperIntegrationService integration;
-    private final String nodeId;
+    private volatile String nodeId = "";
     private final SecureFrameCodec secure;
     private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
     private final ChannelStateCodec channelStates = new ChannelStateCodec();
@@ -52,20 +53,25 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private int taskId;
 
     static PaperNetworkEdge create(LunaChatBukkit plugin, PaperIntegrationService integration, LunaChatConfig config) {
+        if (!config.getIntegrationSharePass().isBlank()) {
+            return new PaperNetworkEdge(plugin, integration, config,
+                    SharedPassphrase.derive(config.getIntegrationSharePass()));
+        }
         byte[] secret;
         try {
             secret = Base64.getDecoder().decode(config.getIntegrationSharedSecret());
         } catch (IllegalArgumentException invalid) {
             throw new IllegalArgumentException("integration.sharedSecret must be valid Base64", invalid);
         }
-        if (secret.length < 32) throw new IllegalArgumentException("network_edge requires a shared secret of at least 32 bytes");
+        if (secret.length < 32) {
+            throw new IllegalArgumentException("network_edge requires integration.sharePass; legacy sharedSecret must decode to at least 32 bytes");
+        }
         return new PaperNetworkEdge(plugin, integration, config, secret);
     }
 
     private PaperNetworkEdge(LunaChatBukkit plugin, PaperIntegrationService integration, LunaChatConfig config, byte[] secret) {
         this.plugin = plugin;
         this.integration = integration;
-        this.nodeId = config.getIntegrationServerId();
         this.secure = new SecureFrameCodec(PROTOCOL, secret,
                 new ReplayWindow(config.getIntegrationDedupCapacity()), Clock.systemUTC());
         this.dedupCapacity = config.getIntegrationDedupCapacity();
@@ -87,7 +93,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
         if (carrier == null) return;
         long nowMillis = System.currentTimeMillis();
         if (!ready.get() || nowMillis - lastHelloMillis >= 10_000L) {
-            send(carrier, FrameType.HELLO, null, nodeId.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(10));
+            send(carrier, FrameType.HELLO, null, new byte[0], Instant.now().plusSeconds(10));
             lastHelloMillis = nowMillis;
         }
         for (ReliableOutbox.Attempt attempt : outbox.pollDue(Instant.now(), 32)) {
@@ -111,9 +117,11 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 throw new FrameAuthenticationException("session mismatch");
             }
             if (frame.type() == FrameType.READY) {
-                if (!nodeId.equals(new String(frame.payload(), StandardCharsets.UTF_8))) {
-                    throw new FrameAuthenticationException("node mismatch");
+                String assignedNode = new String(frame.payload(), StandardCharsets.UTF_8).trim();
+                if (assignedNode.isEmpty() || assignedNode.length() > 128) {
+                    throw new FrameAuthenticationException("invalid assigned node identity");
                 }
+                nodeId = assignedNode;
                 ready.set(true);
                 integration.networkReady();
                 send(player, FrameType.STATE, null, channelStates.encode(integration.channelSnapshot()), Instant.now().plusSeconds(30));
@@ -186,6 +194,13 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 Instant.now().plusSeconds(30));
     }
 
+    boolean isReady() { return ready.get() && !nodeId.isBlank(); }
+
+    String nodeId() {
+        if (!isReady()) throw new IllegalStateException("network node identity is not assigned");
+        return nodeId;
+    }
+
     private synchronized void purgeInbound(Instant now) {
         inboundReceipts.values().removeIf(message -> !message.expiresAt().plus(Duration.ofMinutes(5)).isAfter(now));
         inboundPending.values().removeIf(pending -> !pending.expiresAt().isAfter(now));
@@ -193,6 +208,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
 
     @Override public void close() {
         ready.set(false);
+        nodeId = "";
         if (taskId != 0) Bukkit.getScheduler().cancelTask(taskId);
         Bukkit.getMessenger().unregisterIncomingPluginChannel(plugin, CHANNEL, this);
         Bukkit.getMessenger().unregisterOutgoingPluginChannel(plugin, CHANNEL);

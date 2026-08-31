@@ -78,6 +78,7 @@ public class LunaChatConfig {
     private String integrationServerId;
     private int integrationMaxPending;
     private int integrationDedupCapacity;
+    private String integrationSharePass;
     private String integrationSharedSecret;
 
     /** OPの画面に、全チャンネルの発言内容を表示するかどうか */
@@ -237,7 +238,9 @@ public class LunaChatConfig {
                 "&7[%player -> %to]&f %msg");
         maxPlayerNameLength = Math.max(1,
                 config.getInt("maxPlayerNameLength", 16));
-        integrationRole = config.getString("integration.role", "standalone").toLowerCase();
+        integrationSharePass = config.getString("integration.sharePass", "").trim();
+        integrationRole = integrationSharePass.isBlank()
+                ? config.getString("integration.role", "standalone").toLowerCase() : "network_edge";
         integrationServerId = config.getString("integration.serverId", "paper-1");
         integrationMaxPending = Math.max(1, config.getInt("integration.maxPending", 256));
         integrationDedupCapacity = Math.max(1, config.getInt("integration.dedupCapacity", 4096));
@@ -473,6 +476,7 @@ public class LunaChatConfig {
     public String getIntegrationServerId() { return integrationServerId; }
     public int getIntegrationMaxPending() { return integrationMaxPending; }
     public int getIntegrationDedupCapacity() { return integrationDedupCapacity; }
+    public String getIntegrationSharePass() { return integrationSharePass; }
     public String getIntegrationSharedSecret() { return integrationSharedSecret; }
 
     /**

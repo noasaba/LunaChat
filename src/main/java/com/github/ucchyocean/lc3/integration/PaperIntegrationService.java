@@ -141,7 +141,9 @@ public final class PaperIntegrationService {
             return;
         }
         if (runtime.runtimeRole() == RuntimeRole.NETWORK_EDGE) {
-            if (networkEdge != null) networkEdge.offer(localMessage(channel, member, finalContent));
+            if (networkEdge != null && networkEdge.isReady()) {
+                networkEdge.offer(localMessage(channel, member, finalContent));
+            }
             return;
         }
         runtime.authorityGateway().accept(localMessage(channel, member, finalContent));
@@ -165,8 +167,10 @@ public final class PaperIntegrationService {
             author = new MessageAuthor.System(member == null ? "system" : member.getDisplayName());
             origin = new MessageOrigin(OriginKind.SYSTEM, "lunachat.system", logicalId.toString());
         }
+        String sourceServerId = networkEdge == null
+                ? plugin.getLunaChatConfig().getIntegrationServerId() : networkEdge.nodeId();
         return new AcceptedMessage(logicalId, channel.getChannelId(), channel.getName(),
-                origin, author, plugin.getLunaChatConfig().getIntegrationServerId(), finalContent,
+                origin, author, sourceServerId, finalContent,
                 now, now.plus(Duration.ofMinutes(5)));
     }
 
