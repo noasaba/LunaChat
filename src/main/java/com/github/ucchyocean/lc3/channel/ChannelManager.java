@@ -42,8 +42,6 @@ public class ChannelManager implements LunaChatAPI {
     private File fileDictionary;
     private File fileHidelist;
     private HashMap<String, Channel> channels;
-    /** Existing Paper definitions are only used to reject unsafe edge migrations. */
-    private HashMap<String, Channel> localDefinitions;
     private final boolean authorityManaged;
     private HashMap<String, String> defaultChannels;
     private HashMap<String, String> templates;
@@ -144,7 +142,6 @@ public class ChannelManager implements LunaChatAPI {
 
         // チャンネル設定のロード
         HashMap<String, Channel> loadedChannels = Channel.loadAllChannels();
-        localDefinitions = authorityManaged ? loadedChannels : new HashMap<String, Channel>();
         channels = authorityManaged ? new HashMap<String, Channel>() : loadedChannels;
         PaperIntegrationService integration = PaperIntegrationService.current();
         if ( integration != null ) integration.refresh();
@@ -412,7 +409,10 @@ public class ChannelManager implements LunaChatAPI {
     @Override
     public Channel createChannel(String channelName, ChannelMember member) {
 
-        if (authorityManaged) return null;
+        // A network edge may only return a definition already supplied by
+        // Velocity.  This makes legacy callers idempotent without allocating a
+        // Paper-local ChannelId.
+        if (authorityManaged) return getChannel(channelName);
 
         // LunaChatChannelCreateEvent イベントコール
         EventResult result = LunaChat.getEventSender().sendLunaChatChannelCreateEvent(channelName, member);
@@ -487,9 +487,9 @@ public class ChannelManager implements LunaChatAPI {
     }
 
     /**
-     * Replaces the active Paper catalog with Velocity-owned definitions.  Local
-     * YAML is never used as a source in edge mode; a matching name with a
-     * different ID is rejected before any message can cross the network.
+     * Replaces the active Paper catalog with Velocity-owned definitions. Local
+     * YAML is never a source in edge mode: a same-name legacy channel is
+     * automatically replaced with the canonical Velocity ID.
      */
     public synchronized void applyAuthoritySnapshot(List<ChannelDescriptor> snapshot) {
         if (!authorityManaged) throw new IllegalStateException("not a network edge");
@@ -504,34 +504,15 @@ public class ChannelManager implements LunaChatAPI {
             if (!ids.add(descriptor.id()) || !lookupNames.add(nameKey)) {
                 throw new IllegalArgumentException("duplicate authority channel identity");
             }
-            Channel local = findLocalDefinition(descriptor.name());
-            if (local != null && !local.getChannelId().equals(descriptor.id())) {
-                throw new IllegalStateException("CHANNEL_ID_CONFLICT for " + descriptor.name());
-            }
             String alias = descriptor.aliases().isEmpty() ? "" : descriptor.aliases().iterator().next();
             if (!alias.isBlank() && !lookupNames.add(alias.toLowerCase())) {
                 throw new IllegalArgumentException("duplicate authority channel alias");
-            }
-            if (!alias.isBlank()) {
-                Channel aliasLocal = findLocalDefinition(alias);
-                if (aliasLocal != null && !aliasLocal.getChannelId().equals(descriptor.id())) {
-                    throw new IllegalStateException("CHANNEL_ID_CONFLICT for alias " + alias);
-                }
             }
             Channel channel = new BukkitChannel(descriptor.name());
             channel.applyAuthorityDefinition(descriptor.id(), alias, descriptor.acceptsExternalMessages());
             replacement.put(nameKey, channel);
         }
         channels = replacement;
-    }
-
-    private Channel findLocalDefinition(String nameOrAlias) {
-        Channel direct = localDefinitions.get(nameOrAlias.toLowerCase());
-        if (direct != null) return direct;
-        for (Channel candidate : localDefinitions.values()) {
-            if (nameOrAlias.equalsIgnoreCase(candidate.getAlias())) return candidate;
-        }
-        return null;
     }
 
     /**

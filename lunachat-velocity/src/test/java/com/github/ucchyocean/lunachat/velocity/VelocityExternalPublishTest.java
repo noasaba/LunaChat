@@ -63,6 +63,45 @@ class VelocityExternalPublishTest {
         }
     }
 
+    @Test void configuredCatalogIsSentBeforeAnEdgeCanReceiveMessages() throws Exception {
+        try (Harness harness = new Harness(1)) {
+            // This models a Paper that connected before completing catalog sync.
+            harness.helloClaiming("backend-a", "");
+            SecureFrame state = harness.sent.stream()
+                    .filter(frame -> frame.type() == FrameType.STATE).findFirst().orElseThrow();
+            assertEquals(List.of(harness.channel), new com.github.ucchyocean.lunachat.core.network.ChannelStateCodec()
+                    .decode(state.payload()));
+
+            ExternalMessageRequest request = new ExternalMessageRequest(harness.channel.id(),
+                    new ExternalMessageIdentity("lunabridge:discord", "before-catalog"),
+                    new MessageAuthor.External("lunabridge:discord", "user", "User"),
+                    "hello", Instant.now(), Duration.ofMinutes(5));
+            ExternalPublishResult result = harness.authority.runtime().messages()
+                    .publishExternal(request).toCompletableFuture().get(2, TimeUnit.SECONDS);
+            assertEquals(PublishStatus.UNAVAILABLE, result.status());
+            assertTrue(harness.sent.stream().noneMatch(frame -> frame.type() == FrameType.MESSAGE));
+        }
+    }
+
+    @Test void divergentPaperStateCannotReplaceCanonicalCatalogAndReconnectGetsCanonicalId() throws Exception {
+        try (Harness harness = new Harness(1)) {
+            harness.hello("backend-a");
+            ChannelDescriptor divergent = new ChannelDescriptor(ChannelId.random(), "global", java.util.Set.of(), true);
+            harness.catalogAck("backend-a", List.of(divergent), 3, harness.epoch);
+
+            // A rejected edge session cannot mutate Velocity's persisted/catalog API state.
+            assertEquals(harness.channel.id(), harness.authority.runtime().channels()
+                    .findByNameOrAlias("global").orElseThrow().id());
+
+            harness.sent.clear();
+            harness.reconnect("backend-a");
+            SecureFrame state = harness.sent.stream()
+                    .filter(frame -> frame.type() == FrameType.STATE).findFirst().orElseThrow();
+            assertEquals(harness.channel.id(), new com.github.ucchyocean.lunachat.core.network.ChannelStateCodec()
+                    .decode(state.payload()).getFirst().id());
+        }
+    }
+
     @Test void externalPublishCompletesAfterCanonicalPaperAcksAndSuppressesRetry() throws Exception {
         try (Harness harness = new Harness(2)) {
             harness.hello("backend-a");
@@ -232,10 +271,20 @@ class VelocityExternalPublishTest {
         }
 
         private void catalogAck(String backend) {
-            SecureFrame state = new SecureFrame(2, session(backend), epoch, 2, UUID.randomUUID(), null,
+            catalogAck(backend, List.of(channel), 2, epoch);
+        }
+
+        private void catalogAck(String backend, List<ChannelDescriptor> catalog, long sequence, long frameEpoch) {
+            SecureFrame state = new SecureFrame(2, session(backend), frameEpoch, sequence, UUID.randomUUID(), null,
                     FrameType.STATE, Instant.now(), Instant.now().plusSeconds(30),
-                    new com.github.ucchyocean.lunachat.core.network.ChannelStateCodec().encode(List.of(channel)));
+                    new com.github.ucchyocean.lunachat.core.network.ChannelStateCodec().encode(catalog));
             authority.handle(event(backend, state));
+        }
+
+        private void reconnect(String backend) {
+            SecureFrame hello = new SecureFrame(2, session(backend), epoch + 1, 1, UUID.randomUUID(), null,
+                    FrameType.HELLO, Instant.now(), Instant.now().plusSeconds(30), new byte[0]);
+            authority.handle(event(backend, hello));
         }
 
         private void ack(String backend, AcceptedMessage message) {

@@ -92,10 +92,10 @@ edge. Paper never proposes, creates, migrates, or writes channel YAML in this
 mode. A Paper receives the catalog before it is eligible for network message
 delivery and acknowledges the exact snapshot; mismatches fail closed.
 
-Legacy Paper YAML is inspected only to protect an operator from an unsafe
-migration. A same-name or alias definition with a different ID rejects the
-catalog (`CHANNEL_ID_CONFLICT`); remove or reconcile the legacy definition,
-then reconnect. Standalone Paper keeps the normal YAML-owned behavior.
+Legacy Paper YAML is not a source in network mode. A same-name or alias entry
+with a different legacy ID is replaced in memory by Velocity's canonical ID on
+each catalog sync; no Paper YAML is rewritten. Standalone Paper keeps the
+normal YAML-owned behavior.
 
 LunaBridge in a network topology must run on Velocity and keep its Discord
 mapping there, keyed by the authority ChannelId. LunaChat has no Discord/JDA

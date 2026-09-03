@@ -41,9 +41,10 @@ capabilities and refuse to start on `NETWORK_EDGE`.
 ## Failure signals
 
 - LunaBridge/Discord down: LunaChat local and network chat are independent.
-- Velocity/transport down, catalog mismatch, or legacy same-name/different-ID:
-  Paper local rendering continues; edge network status becomes `UNAVAILABLE`;
-  cross-backend and integration work is not reported as success or delivered.
+- Velocity/transport down or catalog mismatch: Paper local rendering continues;
+  edge network status becomes `UNAVAILABLE`; cross-backend and integration work
+  is not reported as success or delivered. Legacy same-name/different-ID Paper
+  YAML is replaced in memory by the Velocity catalog on reconnect.
 - Paper down: other backends and the Velocity API continue; its bounded outbox expires.
 - Passphrase mismatch/tamper/protocol/session mismatch: warning plus session removal.
 - Replay: debug/fine discard, session retained.
