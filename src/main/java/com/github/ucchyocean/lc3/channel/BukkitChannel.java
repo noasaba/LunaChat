@@ -27,6 +27,7 @@ import com.github.ucchyocean.lc3.integration.PaperIntegrationService;
 import com.github.ucchyocean.lc3.util.ClickableFormat;
 import com.github.ucchyocean.lc3.util.Utility;
 import com.github.ucchyocean.lc3.util.UtilityBukkit;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 import net.md_5.bungee.api.chat.BaseComponent;
 
@@ -42,6 +43,11 @@ public class BukkitChannel extends Channel {
      */
     protected BukkitChannel(String name) {
         super(name);
+    }
+
+    @Override
+    protected boolean isMemberVisibleTo(ChannelMember viewer, ChannelMember member) {
+        return PlayerVisibility.isVisibleTo(viewer, member);
     }
 
     /**

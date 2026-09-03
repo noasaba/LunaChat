@@ -12,6 +12,7 @@ import com.github.ucchyocean.lc3.LunaChat;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * Lunachatコマンドの処理クラス
@@ -177,7 +178,7 @@ public class LunaChatCommand {
                 args[0].equalsIgnoreCase("unmute") ) ) {
             // プレイヤー名で補完する
             String arg = args[1].toLowerCase();
-            return getListPlayerNames(arg);
+            return getListPlayerNames(sender, arg);
 
         } else if ( args.length == 3 && (
                 args[0].equalsIgnoreCase("ban") ||
@@ -208,7 +209,7 @@ public class LunaChatCommand {
                     items.add(name);
                 }
             }
-            items.addAll(getListPlayerNames(arg));
+            items.addAll(getListPlayerNames(sender, arg));
             if ( "player".startsWith(arg) ) {
                 items.add("player");
             }
@@ -224,7 +225,7 @@ public class LunaChatCommand {
 
             // プレイヤー名で補完する
             String arg = args[2].toLowerCase();
-            return getListPlayerNames(arg);
+            return getListPlayerNames(sender, arg);
 
         } else if ( args.length == 3 &&
                 (args[0].equalsIgnoreCase("hide") ||
@@ -233,7 +234,7 @@ public class LunaChatCommand {
 
             // チャンネル名で補完する
             String arg = args[2].toLowerCase();
-            return getListPlayerNames(arg);
+            return getListPlayerNames(sender, arg);
 
         } else if ( args.length == 2 && args[0].equalsIgnoreCase("remove") ) {
             // 削除可能チャンネル名で補完する
@@ -286,7 +287,7 @@ public class LunaChatCommand {
                 args[0].equalsIgnoreCase("set") && args[1].equalsIgnoreCase("default") ) {
             // プレイヤー名で補完する
             String arg = args[2].toLowerCase();
-            return getListPlayerNames(arg);
+            return getListPlayerNames(sender, arg);
 
         } else if ( args.length == 4 &&
                 args[0].equalsIgnoreCase("set") && args[1].equalsIgnoreCase("default") ) {
@@ -374,10 +375,10 @@ public class LunaChatCommand {
      * @param pre 検索キー
      * @return プレイヤー名リスト
      */
-    private List<String> getListPlayerNames(String pre) {
+    private List<String> getListPlayerNames(ChannelMember sender, String pre) {
         String prefix = pre.toLowerCase();
         List<String> items = new ArrayList<String>();
-        for ( String pname : LunaChat.getPlugin().getOnlinePlayerNames() ) {
+        for ( String pname : PlayerVisibility.getVisibleOnlinePlayerNames(sender) ) {
             if ( pname.toLowerCase().startsWith(prefix) ) {
                 items.add(pname);
             }

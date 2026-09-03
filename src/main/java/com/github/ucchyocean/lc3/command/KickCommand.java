@@ -8,6 +8,7 @@ package com.github.ucchyocean.lc3.command;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * kickコマンドの実行クラス
@@ -107,7 +108,8 @@ public class KickCommand extends LunaChatSubCommand {
 
         // キックされるプレイヤーがメンバーかどうかチェックする
         ChannelMember kicked = ChannelMember.getChannelMember(kickedName);
-        if (!channel.getMembers().contains(kicked)) {
+        if (!channel.getMembers().contains(kicked)
+                || !PlayerVisibility.isVisibleTo(sender, kicked)) {
             sender.sendMessage(Messages.errmsgNomemberOther());
             return true;
         }

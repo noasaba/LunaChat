@@ -9,6 +9,7 @@ import com.github.ucchyocean.lc3.LunaChat;
 import com.github.ucchyocean.lc3.LunaChatAPI;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * Japanize変換設定コマンド
@@ -58,7 +59,8 @@ public class LunaChatJapanizeCommand {
 
             // 指定されたプレイヤーが存在するかチェック
             ChannelMember target = ChannelMember.getChannelMember(args[0]);
-            if ( target == null || !target.isOnline() ) {
+            if ( target == null || !target.isOnline()
+                    || !PlayerVisibility.isVisibleTo(sender, target) ) {
                 sender.sendMessage(Messages.errmsgNotfoundPlayer(args[0]));
                 return true;
             }

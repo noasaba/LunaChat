@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * moderatorコマンドの実行クラス
@@ -123,10 +124,12 @@ public class ModeratorCommand extends LunaChatSubCommand {
             if ( mod.startsWith("-") ) {
                 String name = mod.substring(1);
                 ChannelMember cp = ChannelMember.getChannelMember(name);
+                if (!PlayerVisibility.isVisibleTo(sender, cp)) continue;
                 channel.removeModerator(cp);
                 sender.sendMessage(Messages.cmdmsgModeratorMinus(name, cname));
             } else {
                 ChannelMember cp = ChannelMember.getChannelMember(mod);
+                if (!PlayerVisibility.isVisibleTo(sender, cp)) continue;
                 channel.addModerator(cp);
                 sender.sendMessage(Messages.cmdmsgModerator(mod, cname));
             }

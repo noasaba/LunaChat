@@ -689,6 +689,12 @@ public abstract class Channel {
      */
     public List<String> getInfo(boolean forModerator) {
 
+        return getInfo(forModerator, null);
+    }
+
+    /** Returns channel information filtered for a Paper viewer when supplied. */
+    public List<String> getInfo(boolean forModerator, ChannelMember viewer) {
+
         ArrayList<String> info = new ArrayList<String>();
         info.add(Messages.channelInfoFirstLine());
 
@@ -711,15 +717,20 @@ public abstract class Channel {
             StringBuffer buf = new StringBuffer();
             buf.append(Messages.channelInfoPrefix());
 
+            int visibleIndex = 0;
             for ( int i=0; i<getMembers().size(); i++ ) {
+                ChannelMember cp = getMembers().get(i);
+                if (!isMemberVisibleTo(viewer, cp)) {
+                    continue;
+                }
 
-                if ( i%5 == 0 && i != 0 ) {
+                if ( visibleIndex%5 == 0 && visibleIndex != 0 ) {
                     info.add(buf.toString());
                     buf = new StringBuffer();
                     buf.append(Messages.channelInfoPrefix());
                 }
 
-                ChannelMember cp = getMembers().get(i);
+                visibleIndex++;
                 String name = cp.getName();
                 String disp;
                 if ( getModerator().contains(cp) ) {
@@ -806,6 +817,11 @@ public abstract class Channel {
         info.add(Messages.listEndLine());
 
         return info;
+    }
+
+    /** Visibility hook for platform-specific channel implementations. */
+    protected boolean isMemberVisibleTo(ChannelMember viewer, ChannelMember member) {
+        return true;
     }
 
     /**

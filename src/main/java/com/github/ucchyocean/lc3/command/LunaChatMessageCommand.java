@@ -14,6 +14,7 @@ import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
 import com.github.ucchyocean.lc3.util.PlayerNameValidator;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * 1:1チャット送信コマンド
@@ -76,7 +77,8 @@ public class LunaChatMessageCommand {
 
         // 招待相手が存在するかどうかを確認する
         ChannelMember invited = ChannelMember.getChannelMember(invitedName);
-        if ( invited == null || !invited.isOnline() ) {
+        if ( invited == null || !invited.isOnline()
+                || !PlayerVisibility.isVisibleTo(inviter, invited) ) {
             inviter.sendMessage(Messages.errmsgNotfoundPlayer(invitedName));
             return;
         }
@@ -134,7 +136,7 @@ public class LunaChatMessageCommand {
         if ( args.length == 1 ) {
             // プレイヤー名で補完する
             String arg = args[0].toLowerCase();
-            return getListPlayerNames(arg);
+            return getListPlayerNames(sender, arg);
 
         }
         return new ArrayList<>();
@@ -145,10 +147,10 @@ public class LunaChatMessageCommand {
      * @param pre 検索キー
      * @return プレイヤー名リスト
      */
-    private List<String> getListPlayerNames(String pre) {
+    private List<String> getListPlayerNames(ChannelMember sender, String pre) {
         String prefix = pre.toLowerCase();
         List<String> items = new ArrayList<String>();
-        for ( String pname : LunaChat.getPlugin().getOnlinePlayerNames() ) {
+        for ( String pname : PlayerVisibility.getVisibleOnlinePlayerNames(sender) ) {
             if ( pname.toLowerCase().startsWith(prefix) ) {
                 items.add(pname);
             }

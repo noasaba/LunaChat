@@ -8,6 +8,7 @@ package com.github.ucchyocean.lc3.command;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * unmuteコマンドの実行クラス
@@ -101,7 +102,8 @@ public class UnmuteCommand extends LunaChatSubCommand {
 
         // Mute解除されるプレイヤーがMuteされているかどうかチェックする
         ChannelMember kicked = ChannelMember.getChannelMember(kickedName);
-        if (!channel.getMuted().contains(kicked)) {
+        if (!channel.getMuted().contains(kicked)
+                || !PlayerVisibility.isVisibleTo(sender, kicked)) {
             sender.sendMessage(Messages.errmsgNotMuted());
             return true;
         }

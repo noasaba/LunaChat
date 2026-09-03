@@ -8,6 +8,7 @@ package com.github.ucchyocean.lc3.command;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * pardonコマンドの実行クラス
@@ -101,7 +102,8 @@ public class PardonCommand extends LunaChatSubCommand {
 
         // BAN解除されるプレイヤーがBANされているかどうかチェックする
         ChannelMember kicked = ChannelMember.getChannelMember(kickedName);
-        if (!channel.getBanned().contains(kicked)) {
+        if (!channel.getBanned().contains(kicked)
+                || !PlayerVisibility.isVisibleTo(sender, kicked)) {
             sender.sendMessage(Messages.errmsgNotBanned());
             return true;
         }

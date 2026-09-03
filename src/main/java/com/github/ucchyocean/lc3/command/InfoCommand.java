@@ -106,7 +106,7 @@ public class InfoCommand extends LunaChatSubCommand {
         boolean isModerator = channel.hasModeratorPermission(sender);
 
         // 情報を取得して表示する
-        List<String> list = channel.getInfo(isModerator);
+        List<String> list = channel.getInfo(isModerator, sender);
         for (String msg : list) {
             sender.sendMessage(msg);
         }

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 import com.github.ucchyocean.lc3.util.Utility;
 
 /**
@@ -148,6 +149,10 @@ public class HideCommand extends LunaChatSubCommand {
 
             // 既に非表示になっていないかどうかをチェックする
             ChannelMember hided = ChannelMember.getChannelMember(cname);
+            if ( hided == null || !PlayerVisibility.isVisibleTo(sender, hided) ) {
+                sender.sendMessage(Messages.errmsgNotfoundPlayer(cname));
+                return true;
+            }
             if ( api.getHidelist(hided).contains(sender) ) {
                 sender.sendMessage(Messages.errmsgAlreadyHidedPlayer());
                 return true;

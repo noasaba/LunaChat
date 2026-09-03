@@ -8,6 +8,7 @@ package com.github.ucchyocean.lc3.command;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * inviteコマンドの実行クラス
@@ -114,7 +115,8 @@ public class InviteCommand extends LunaChatSubCommand {
 
         // 招待相手が存在するかどうかを確認する
         ChannelMember invited = ChannelMember.getChannelMember(invitedName);
-        if ( invited == null || !invited.isOnline() ) {
+        if ( invited == null || !invited.isOnline()
+                || !PlayerVisibility.isVisibleTo(sender, invited) ) {
             sender.sendMessage(Messages.errmsgNotfoundPlayer(invitedName));
             return true;
         }
@@ -175,7 +177,8 @@ public class InviteCommand extends LunaChatSubCommand {
         // 招待相手が存在するかどうかを確認する
         String invitedName = args[1];
         ChannelMember invited = ChannelMember.getChannelMember(invitedName);
-        if ( invited == null || !invited.isOnline() ) {
+        if ( invited == null || !invited.isOnline()
+                || !PlayerVisibility.isVisibleTo(sender, invited) ) {
             sender.sendMessage(Messages.errmsgNotfoundPlayer(invitedName));
             return true;
         }

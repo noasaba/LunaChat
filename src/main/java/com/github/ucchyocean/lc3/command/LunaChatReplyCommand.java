@@ -7,6 +7,7 @@ package com.github.ucchyocean.lc3.command;
 
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * 1:1チャット受信コマンド
@@ -33,7 +34,10 @@ public class LunaChatReplyCommand extends LunaChatMessageCommand {
 
         // 引数が無ければ、現在の会話相手を表示して終了する
         if (args.length == 0) {
-            if ( invitedName == null ) {
+            ChannelMember target = invitedName == null ? null
+                    : ChannelMember.getChannelMember(invitedName);
+            if ( invitedName == null || target == null || !target.isOnline()
+                    || !PlayerVisibility.isVisibleTo(inviter, target) ) {
                 sender.sendMessage(Messages.cmdmsgReplyInviterNone(inviter.getName()));
             } else {
                 sender.sendMessage(Messages.cmdmsgReplyInviter(inviter.getName(), invitedName));
