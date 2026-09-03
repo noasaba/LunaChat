@@ -241,6 +241,9 @@ permissions:
   lunachat-admin.force-invite:
     description: force invite command permission
     default: op
+  lunachat-admin:
+    description: administrator bypass while channel chat is disabled
+    default: op
   lunachat-admin.*:
     children:
       lunachat-admin.mod-all-channels: true
@@ -251,4 +254,5 @@ permissions:
       lunachat-admin.reload: true
       lunachat-admin.japanize-other: true
       lunachat-admin.force-invite: true
+      lunachat-admin: true
     description: permissions for the administrator

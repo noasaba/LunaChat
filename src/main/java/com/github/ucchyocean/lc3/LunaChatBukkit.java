@@ -207,6 +207,12 @@ public class LunaChatBukkit extends JavaPlugin implements PluginInterface {
         List<String> completeList = null;
         if ( command.getName().equals("lunachat") ) {
             completeList = lunachatCommand.onTabComplete(ChannelMember.getChannelMember(sender), label, args);
+        } else if ( command.getName().equals("tell") ) {
+            completeList = messageCommand.onTabComplete(ChannelMember.getChannelMember(sender), label, args);
+        } else if ( command.getName().equals("reply") ) {
+            // Reply has no player-name argument; return an explicit empty list
+            // rather than delegating to a platform completion implementation.
+            completeList = java.util.Collections.emptyList();
         }
         if ( completeList != null ) {
             return completeList;

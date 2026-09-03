@@ -7,6 +7,7 @@ package com.github.ucchyocean.lc3.command;
 
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 
 /**
  * denyコマンドの実行クラス
@@ -84,7 +85,7 @@ public class DenyCommand extends LunaChatSubCommand {
         // メッセージ送信
         sender.sendMessage(Messages.cmdmsgDeny());
         ChannelMember inviter = ChannelMember.getChannelMember(inviterName);
-        if (inviter != null && inviter.isOnline()) {
+        if (inviter != null && inviter.isOnline() && PlayerVisibility.isVisibleTo(inviter, sender)) {
             inviter.sendMessage(Messages.cmdmsgDenyed());
         }
         return true;

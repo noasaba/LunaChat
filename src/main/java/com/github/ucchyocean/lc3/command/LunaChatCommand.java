@@ -171,6 +171,7 @@ public class LunaChatCommand {
             return items;
 
         } else if ( args.length == 2 && (
+                args[0].equalsIgnoreCase("invite") ||
                 args[0].equalsIgnoreCase("ban") ||
                 args[0].equalsIgnoreCase("pardon") ||
                 args[0].equalsIgnoreCase("kick") ||
@@ -234,7 +235,13 @@ public class LunaChatCommand {
 
             // チャンネル名で補完する
             String arg = args[2].toLowerCase();
-            return getListPlayerNames(sender, arg);
+            ArrayList<String> items = new ArrayList<String>();
+            for ( String name : getListCanJoin(sender) ) {
+                if ( name.toLowerCase().startsWith(arg) ) {
+                    items.add(name);
+                }
+            }
+            return items;
 
         } else if ( args.length == 2 && args[0].equalsIgnoreCase("remove") ) {
             // 削除可能チャンネル名で補完する

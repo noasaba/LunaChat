@@ -38,6 +38,13 @@ only on Velocity, against that ChannelId.
 Do not combine standalone and network bridge modes. A bridge must check role and
 capabilities and refuse to start on `NETWORK_EDGE`.
 
+## Command and permission surfaces
+
+Paper registers `/lunachat` (aliases `/ch`, `/lc`), `/tell` (aliases `/msg`,
+`/message`, `/m`, `/t`), `/reply` (alias `/r`), and `/japanize` (alias `/jp`).
+`lunachat-admin` is the documented op-default bypass while channel chat is
+disabled; the granular `lunachat-admin.*` nodes remain unchanged.
+
 ## Failure signals
 
 - LunaBridge/Discord down: LunaChat local and network chat are independent.
