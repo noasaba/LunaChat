@@ -150,6 +150,7 @@ public class BukkitChannel extends Channel {
                 recipients.remove(cp);
             }
         }
+        int recipientsBeforeEvents = recipients.size();
 
         // LunaChatChannelMessageEvent イベントコール
         String name = (player != null) ? player.getDisplayName() : "<null>";
@@ -161,8 +162,6 @@ public class BukkitChannel extends Channel {
             message = result.getMessage();
             recipients = result.getRecipients();
         }
-
-        if ( integration != null && !canonicalRender ) integration.accepted(this, player, message);
 
         // 通常ブロードキャストなら、設定に応じてdynmapへ送信する
         DynmapBridge dynmap = LunaChatBukkit.getInstance().getDynmap();
@@ -182,6 +181,7 @@ public class BukkitChannel extends Channel {
         }
 
         // 送信する
+        String finalContent = message;
         if ( format != null ) {
             format.replace("%msg", message);
             BaseComponent[] comps = format.makeTextComponent();
@@ -193,6 +193,13 @@ public class BukkitChannel extends Channel {
             for ( ChannelMember p : recipients ) {
                 p.sendMessage(message);
             }
+        }
+
+        // Network acknowledgement is deliberately after the Bukkit delivery
+        // loop.  This keeps the external diagnostic tied to the actual final
+        // recipient list rather than only to successful rendering.
+        if ( integration != null && !canonicalRender ) {
+            integration.accepted(this, player, finalContent, recipientsBeforeEvents, recipients.size());
         }
 
         // 設定に応じて、コンソールに出力する

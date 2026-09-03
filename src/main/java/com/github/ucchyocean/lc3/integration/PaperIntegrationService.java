@@ -132,12 +132,25 @@ public final class PaperIntegrationService {
                 proposed.createdAt(), proposed.expiresAt());
     }
 
-    /** Called after filters/events have fixed final content, before local rendering. */
-    public void accepted(Channel channel, ChannelMember member, String finalContent) {
+    /** Called after filters/events and the Bukkit delivery loop have completed. */
+    public void accepted(Channel channel, ChannelMember member, String finalContent,
+            int recipientsBeforeEvents, int deliveredRecipients) {
         if (Boolean.TRUE.equals(canonicalRender.get())) return;
         Pending pending = externalCall.get();
         if (pending != null) {
             AcceptedMessage proposed = pending.proposed();
+            if (deliveredRecipients == 0) {
+                plugin.getLogger().warning("LunaChat external delivery had no local recipients: messageId="
+                        + proposed.messageId() + ", channelId=" + channel.getChannelId()
+                        + ", channel=" + channel.getName() + ", recipientsBeforeEvents="
+                        + recipientsBeforeEvents + ", recipientsAfterEvents=" + deliveredRecipients
+                        + ", broadcast=" + channel.isBroadcastChannel()
+                        + ", configuredMembers=" + channel.getMembers().size());
+            } else {
+                plugin.getLogger().fine("LunaChat external delivery completed: messageId="
+                        + proposed.messageId() + ", channelId=" + channel.getChannelId()
+                        + ", recipients=" + deliveredRecipients);
+            }
             pending.completion().complete(new AcceptedMessage(proposed.messageId(), channel.getChannelId(),
                     channel.getName(), proposed.origin(), proposed.author(), proposed.sourceServerId(), finalContent,
                     proposed.createdAt(), proposed.expiresAt()));
