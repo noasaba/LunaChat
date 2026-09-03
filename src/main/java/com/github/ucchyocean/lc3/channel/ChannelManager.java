@@ -508,7 +508,17 @@ public class ChannelManager implements LunaChatAPI {
             if (!alias.isBlank() && !lookupNames.add(alias.toLowerCase())) {
                 throw new IllegalArgumentException("duplicate authority channel alias");
             }
-            Channel channel = new BukkitChannel(descriptor.name());
+        }
+        // Validate the complete catalog before touching any live replica. A
+        // repeated STATE must not erase membership or per-player hide state.
+        for (ChannelDescriptor descriptor : snapshot) {
+            String nameKey = descriptor.name().toLowerCase();
+            String alias = descriptor.aliases().isEmpty() ? "" : descriptor.aliases().iterator().next();
+            Channel channel = channels.get(nameKey);
+            if (channel == null || !channel.getChannelId().equals(descriptor.id())
+                    || !channel.getName().equals(descriptor.name())) {
+                channel = new BukkitChannel(descriptor.name());
+            }
             channel.applyAuthorityDefinition(descriptor.id(), alias, descriptor.acceptsExternalMessages());
             replacement.put(nameKey, channel);
         }
