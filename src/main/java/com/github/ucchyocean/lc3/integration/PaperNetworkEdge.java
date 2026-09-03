@@ -96,7 +96,9 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
         if (!isReady() || nowMillis - lastHelloMillis >= 10_000L) {
             send(carrier, FrameType.HELLO, null, new byte[0], Instant.now().plusSeconds(10));
             lastHelloMillis = nowMillis;
+            return;
         }
+        if (!isReady()) return;
         for (ReliableOutbox.Attempt attempt : outbox.pollDue(Instant.now(), 32)) {
             SecureFrame frame = new SecureFrame(PROTOCOL, sessionId, epoch, attempt.sequence(), attempt.frameId(),
                     attempt.logicalMessageId(), FrameType.MESSAGE, Instant.now(), attempt.expiresAt(), attempt.payload());

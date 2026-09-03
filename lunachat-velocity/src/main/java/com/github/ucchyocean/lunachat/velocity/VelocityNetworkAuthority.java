@@ -84,6 +84,12 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         try {
             SecureFrame frame = secure.decode(event.getData());
             if (frame.type() == FrameType.HELLO) {
+                Session existing = sessions.get(sourceNode);
+                // A periodic heartbeat is not a new handshake. Replaying the
+                // catalog here resets live Paper membership and opens a window
+                // where an in-flight MESSAGE appears to be unauthenticated.
+                if (existing != null && existing.id().equals(frame.sessionId())
+                        && existing.epoch() == frame.epoch() && existing.catalogSynchronized()) return;
                 sessions.put(sourceNode, new Session(frame.sessionId(), frame.epoch(), false));
                 sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.READY, null,
                         sourceNode.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(10));
@@ -100,7 +106,10 @@ final class VelocityNetworkAuthority implements AutoCloseable {
                 sessions.put(sourceNode, new Session(session.id(), session.epoch(), true));
             } else if (frame.type() == FrameType.MESSAGE && frame.logicalMessageId() != null) {
                 if (!isCatalogSynchronized(sourceNode)) {
-                    throw new FrameAuthenticationException("channel catalog is not synchronized");
+                    // requireSession already authenticated this sender. The
+                    // outbox retries without an ACK after catalog sync finishes.
+                    logger.debug("Deferred LunaChat message from {} pending catalog synchronization", sourceNode);
+                    return;
                 }
                 AcceptedMessage accepted = messages.decode(frame.payload());
                 if (!frame.logicalMessageId().equals(accepted.messageId()) || !sourceNode.equals(accepted.sourceServerId())) {
@@ -242,7 +251,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         }
         outboxes.forEach((node, outbox) -> {
             Session session = sessions.get(node);
-            if (session == null) return;
+            if (session == null || !session.catalogSynchronized()) return;
             for (ReliableOutbox.Attempt attempt : outbox.pollDue(now, 32)) {
                 sendAttempt(node, session, attempt);
             }

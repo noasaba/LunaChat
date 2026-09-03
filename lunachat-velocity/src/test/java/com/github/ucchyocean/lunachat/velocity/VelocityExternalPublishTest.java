@@ -49,6 +49,42 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VelocityExternalPublishTest {
+    @Test void heartbeatKeepsCatalogSynchronizedAndExternalPublishAvailable() throws Exception {
+        try (Harness harness = new Harness(1)) {
+            harness.hello("backend-a");
+            harness.sent.clear();
+            harness.helloClaiming("backend-a", "");
+            assertTrue(harness.sent.isEmpty(), "same-session heartbeat must not reset/reapply the catalog");
+            ExternalMessageRequest request = new ExternalMessageRequest(harness.channel.id(),
+                    new ExternalMessageIdentity("test:external", "heartbeat"),
+                    new MessageAuthor.External("test:external", "user", "User"),
+                    "hello", Instant.now(), Duration.ofMinutes(5));
+            var result = harness.authority.runtime().messages().publishExternal(request).toCompletableFuture();
+            harness.awaitDeliveries(1);
+            SecureFrame delivery = harness.sent.stream().filter(f -> f.type() == FrameType.MESSAGE)
+                    .findFirst().orElseThrow();
+            harness.ack("backend-a", harness.messages.decode(delivery.payload()));
+            assertEquals(PublishStatus.ACCEPTED, result.get(2, TimeUnit.SECONDS).status());
+        }
+    }
+
+    @Test void messageBeforeCatalogAckDoesNotDestroySessionAndRetryIsAccepted() throws Exception {
+        try (Harness harness = new Harness(1)) {
+            harness.helloClaiming("backend-a", "");
+            AcceptedMessage message = harness.minecraftMessage("backend-a", "hello");
+            harness.message("backend-a", message);
+            assertTrue(harness.sent.stream().noneMatch(f -> f.type() == FrameType.ACK));
+            harness.catalogAck("backend-a");
+            harness.message("backend-a", message);
+            for (int attempt = 0; attempt < 100
+                    && harness.sent.stream().noneMatch(f -> f.type() == FrameType.ACK); attempt++) {
+                Thread.sleep(5L);
+            }
+            assertTrue(harness.sent.stream().anyMatch(f -> f.type() == FrameType.ACK
+                    && message.messageId().equals(f.logicalMessageId())));
+        }
+    }
+
     private static final byte[] SECRET = "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
     private static final ChannelIdentifier CHANNEL = proxy(ChannelIdentifier.class,
             (method, args) -> method.getName().equals("getId") ? "lunachat:network_v2" : defaultValue(method.getReturnType()));
