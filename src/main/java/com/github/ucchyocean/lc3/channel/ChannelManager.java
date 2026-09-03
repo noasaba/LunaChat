@@ -21,6 +21,8 @@ import com.github.ucchyocean.lc3.japanize.JapanizeType;
 import com.github.ucchyocean.lc3.member.ChannelMember;
 import com.github.ucchyocean.lc3.util.YamlConfig;
 import com.github.ucchyocean.lc3.integration.PaperIntegrationService;
+import com.github.ucchyocean.lunachat.api.ChannelDescriptor;
+import com.github.ucchyocean.lunachat.api.ChannelId;
 
 /**
  * チャンネルマネージャー
@@ -40,6 +42,9 @@ public class ChannelManager implements LunaChatAPI {
     private File fileDictionary;
     private File fileHidelist;
     private HashMap<String, Channel> channels;
+    /** Existing Paper definitions are only used to reject unsafe edge migrations. */
+    private HashMap<String, Channel> localDefinitions;
+    private final boolean authorityManaged;
     private HashMap<String, String> defaultChannels;
     private HashMap<String, String> templates;
     private HashMap<String, Boolean> japanize;
@@ -50,6 +55,8 @@ public class ChannelManager implements LunaChatAPI {
      * コンストラクタ
      */
     public ChannelManager() {
+        authorityManaged = LunaChat.getConfig() != null
+                && "network_edge".equals(LunaChat.getConfig().getIntegrationRole());
         reloadAllData();
     }
 
@@ -136,7 +143,9 @@ public class ChannelManager implements LunaChatAPI {
         }
 
         // チャンネル設定のロード
-        channels = Channel.loadAllChannels();
+        HashMap<String, Channel> loadedChannels = Channel.loadAllChannels();
+        localDefinitions = authorityManaged ? loadedChannels : new HashMap<String, Channel>();
+        channels = authorityManaged ? new HashMap<String, Channel>() : loadedChannels;
         PaperIntegrationService integration = PaperIntegrationService.current();
         if ( integration != null ) integration.refresh();
     }
@@ -403,6 +412,8 @@ public class ChannelManager implements LunaChatAPI {
     @Override
     public Channel createChannel(String channelName, ChannelMember member) {
 
+        if (authorityManaged) return null;
+
         // LunaChatChannelCreateEvent イベントコール
         EventResult result = LunaChat.getEventSender().sendLunaChatChannelCreateEvent(channelName, member);
         if ( result.isCancelled() ) {
@@ -445,6 +456,8 @@ public class ChannelManager implements LunaChatAPI {
     @Override
     public boolean removeChannel(String channelName, ChannelMember member) {
 
+        if (authorityManaged) return false;
+
         channelName = channelName.toLowerCase();
 
         // LunaChatChannelRemoveEvent イベントコール
@@ -471,6 +484,54 @@ public class ChannelManager implements LunaChatAPI {
         }
 
         return true;
+    }
+
+    /**
+     * Replaces the active Paper catalog with Velocity-owned definitions.  Local
+     * YAML is never used as a source in edge mode; a matching name with a
+     * different ID is rejected before any message can cross the network.
+     */
+    public synchronized void applyAuthoritySnapshot(List<ChannelDescriptor> snapshot) {
+        if (!authorityManaged) throw new IllegalStateException("not a network edge");
+        HashMap<String, Channel> replacement = new HashMap<String, Channel>();
+        java.util.HashSet<ChannelId> ids = new java.util.HashSet<ChannelId>();
+        java.util.HashSet<String> lookupNames = new java.util.HashSet<String>();
+        for (ChannelDescriptor descriptor : snapshot) {
+            if (descriptor.aliases().size() > 1) {
+                throw new IllegalArgumentException("Paper supports at most one authority channel alias");
+            }
+            String nameKey = descriptor.name().toLowerCase();
+            if (!ids.add(descriptor.id()) || !lookupNames.add(nameKey)) {
+                throw new IllegalArgumentException("duplicate authority channel identity");
+            }
+            Channel local = findLocalDefinition(descriptor.name());
+            if (local != null && !local.getChannelId().equals(descriptor.id())) {
+                throw new IllegalStateException("CHANNEL_ID_CONFLICT for " + descriptor.name());
+            }
+            String alias = descriptor.aliases().isEmpty() ? "" : descriptor.aliases().iterator().next();
+            if (!alias.isBlank() && !lookupNames.add(alias.toLowerCase())) {
+                throw new IllegalArgumentException("duplicate authority channel alias");
+            }
+            if (!alias.isBlank()) {
+                Channel aliasLocal = findLocalDefinition(alias);
+                if (aliasLocal != null && !aliasLocal.getChannelId().equals(descriptor.id())) {
+                    throw new IllegalStateException("CHANNEL_ID_CONFLICT for alias " + alias);
+                }
+            }
+            Channel channel = new BukkitChannel(descriptor.name());
+            channel.applyAuthorityDefinition(descriptor.id(), alias, descriptor.acceptsExternalMessages());
+            replacement.put(nameKey, channel);
+        }
+        channels = replacement;
+    }
+
+    private Channel findLocalDefinition(String nameOrAlias) {
+        Channel direct = localDefinitions.get(nameOrAlias.toLowerCase());
+        if (direct != null) return direct;
+        for (Channel candidate : localDefinitions.values()) {
+            if (nameOrAlias.equalsIgnoreCase(candidate.getAlias())) return candidate;
+        }
+        return null;
     }
 
     /**

@@ -194,7 +194,7 @@ class VelocityExternalPublishTest {
         private Harness(int backendCount, int receiptCapacity) throws Exception {
             directory = Files.createTempDirectory("lunachat-velocity-test");
             AuthorityChannelStore store = new AuthorityChannelStore(directory);
-            store.applyProposal("backend-a", List.of(channel));
+            store.replace(List.of(channel));
             servers = new ArrayList<>();
             for (int i = 0; i < backendCount; i++) servers.add(server("backend-" + (char) ('a' + i)));
             proxy = proxy(ProxyServer.class, (method, args) -> switch (method.getName()) {
@@ -221,6 +221,7 @@ class VelocityExternalPublishTest {
 
         private void hello(String backend) {
             helloClaiming(backend, "");
+            catalogAck(backend);
         }
 
         private void helloClaiming(String backend, String claimedIdentity) {
@@ -228,6 +229,13 @@ class VelocityExternalPublishTest {
                     FrameType.HELLO, Instant.now(), Instant.now().plusSeconds(30),
                     claimedIdentity.getBytes(StandardCharsets.UTF_8));
             authority.handle(event(backend, hello));
+        }
+
+        private void catalogAck(String backend) {
+            SecureFrame state = new SecureFrame(2, session(backend), epoch, 2, UUID.randomUUID(), null,
+                    FrameType.STATE, Instant.now(), Instant.now().plusSeconds(30),
+                    new com.github.ucchyocean.lunachat.core.network.ChannelStateCodec().encode(List.of(channel)));
+            authority.handle(event(backend, state));
         }
 
         private void ack(String backend, AcceptedMessage message) {

@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Velocity network authority and authenticated routing state machine. */
 final class VelocityNetworkAuthority implements AutoCloseable {
-    private record Session(UUID id, long epoch) {}
+    private record Session(UUID id, long epoch, boolean catalogSynchronized) {}
     private record PendingExternal(AcceptedMessage message, CompletableFuture<AcceptedMessage> completion) {}
     private enum LogicalAdmission { NEW, PENDING, DUPLICATE, FULL }
     private final ProxyServer proxy;
@@ -84,16 +84,24 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         try {
             SecureFrame frame = secure.decode(event.getData());
             if (frame.type() == FrameType.HELLO) {
-                sessions.put(sourceNode, new Session(frame.sessionId(), frame.epoch()));
+                sessions.put(sourceNode, new Session(frame.sessionId(), frame.epoch(), false));
                 sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.READY, null,
                         sourceNode.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(10));
+                sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.STATE, null,
+                        channelStates.encode(store.snapshot()), Instant.now().plusSeconds(30));
                 return;
             }
             requireSession(sourceNode, frame);
             if (frame.type() == FrameType.STATE) {
-                store.applyProposal(sourceNode, channelStates.decode(frame.payload()));
-                directory.replace(store.snapshot());
+                if (!store.snapshot().equals(channelStates.decode(frame.payload()))) {
+                    throw new FrameAuthenticationException("channel catalog acknowledgement mismatch");
+                }
+                Session session = sessions.get(sourceNode);
+                sessions.put(sourceNode, new Session(session.id(), session.epoch(), true));
             } else if (frame.type() == FrameType.MESSAGE && frame.logicalMessageId() != null) {
+                if (!isCatalogSynchronized(sourceNode)) {
+                    throw new FrameAuthenticationException("channel catalog is not synchronized");
+                }
                 AcceptedMessage accepted = messages.decode(frame.payload());
                 if (!frame.logicalMessageId().equals(accepted.messageId()) || !sourceNode.equals(accepted.sourceServerId())) {
                     throw new FrameAuthenticationException("message identity mismatch");
@@ -152,8 +160,9 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         pendingExternal.put(canonical.messageId(), pending);
         int committed = 0;
         Instant now = Instant.now();
-        for (ReliableOutbox outbox : outboxes.values()) {
-            if (outbox.offer(canonical.messageId(), messages.encode(canonical), canonical.expiresAt(), now)) committed++;
+        for (Map.Entry<String, ReliableOutbox> entry : outboxes.entrySet()) {
+            if (isCatalogSynchronized(entry.getKey())
+                    && entry.getValue().offer(canonical.messageId(), messages.encode(canonical), canonical.expiresAt(), now)) committed++;
         }
         if (committed == 0) {
             pendingExternal.remove(canonical.messageId(), pending);
@@ -200,7 +209,8 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         byte[] payload = messages.encode(canonical);
         Instant now = Instant.now();
         outboxes.forEach((node, outbox) -> {
-            if (!node.equals(sourceNode) && !outbox.offer(canonical.messageId(), payload, canonical.expiresAt(), now)) {
+            if (!node.equals(sourceNode) && isCatalogSynchronized(node)
+                    && !outbox.offer(canonical.messageId(), payload, canonical.expiresAt(), now)) {
                 logger.warn("Network outbox for {} rejected logical message {}", node, canonical.messageId());
             }
         });
@@ -215,11 +225,6 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         outboxes.keySet().stream().filter(node -> !activeNodes.contains(node)).toList().forEach(node -> {
             outboxes.remove(node);
             sessions.remove(node);
-            try {
-                store.removeProposal(node);
-            } catch (IOException failure) {
-                logger.error("Could not remove stale LunaChat channel proposal for {}", node, failure);
-            }
         });
         directory.replace(store.snapshot());
         synchronized (this) {
@@ -270,6 +275,11 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         if (expected == null || !expected.id().equals(frame.sessionId()) || expected.epoch() != frame.epoch()) {
             throw new FrameAuthenticationException("unknown or stale session");
         }
+    }
+
+    private boolean isCatalogSynchronized(String node) {
+        Session session = sessions.get(node);
+        return session != null && session.catalogSynchronized();
     }
 
     private void sendAttempt(String node, Session session, ReliableOutbox.Attempt attempt) {

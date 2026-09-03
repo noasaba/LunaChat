@@ -18,13 +18,11 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Durable Velocity authority state. Paper STATE frames are authenticated proposals. */
+/** Durable, Velocity-owned channel catalog. Paper STATE frames only acknowledge it. */
 final class AuthorityChannelStore {
     private static final int SCHEMA = 1;
     private final Path file;
     private final Map<ChannelId, ChannelDescriptor> channels = new HashMap<>();
-    private final Map<String, Map<ChannelId, ChannelDescriptor>> proposalsByNode = new HashMap<>();
-    private boolean receivedFreshProposal;
 
     AuthorityChannelStore(Path directory) throws IOException {
         Files.createDirectories(directory);
@@ -36,28 +34,22 @@ final class AuthorityChannelStore {
         return channels.values().stream().sorted(java.util.Comparator.comparing(ChannelDescriptor::name)).toList();
     }
 
-    synchronized void applyProposal(String sourceNode, List<ChannelDescriptor> proposal) throws IOException {
-        if (!receivedFreshProposal) {
-            proposalsByNode.clear();
-            receivedFreshProposal = true;
-        }
+    /** Replaces the Velocity-owned catalog; Paper nodes never call this method. */
+    synchronized void replace(List<ChannelDescriptor> proposal) throws IOException {
         Map<ChannelId, ChannelDescriptor> replacement = new LinkedHashMap<>();
-        for (ChannelDescriptor channel : proposal) replacement.put(channel.id(), channel);
-        proposalsByNode.put(sourceNode, Map.copyOf(replacement));
-        rebuildFromFreshProposals();
-        save();
-    }
-
-    synchronized void removeProposal(String sourceNode) throws IOException {
-        if (!receivedFreshProposal || proposalsByNode.remove(sourceNode) == null) return;
-        rebuildFromFreshProposals();
-        save();
-    }
-
-    private void rebuildFromFreshProposals() {
+        java.util.Set<String> lookupNames = new java.util.HashSet<>();
+        for (ChannelDescriptor channel : proposal) {
+            if (replacement.put(channel.id(), channel) != null
+                    || !lookupNames.add(channel.name().toLowerCase())) {
+                throw new IOException("duplicate authority channel identity");
+            }
+            for (String alias : channel.aliases()) {
+                if (!lookupNames.add(alias.toLowerCase())) throw new IOException("duplicate authority channel alias");
+            }
+        }
         channels.clear();
-        proposalsByNode.entrySet().stream().sorted(Map.Entry.comparingByKey())
-                .forEach(entry -> entry.getValue().values().forEach(channel -> channels.put(channel.id(), channel)));
+        channels.putAll(replacement);
+        save();
     }
 
     private void load() throws IOException {
@@ -75,8 +67,20 @@ final class AuthorityChannelStore {
             String aliases = properties.getProperty(prefix + "aliases", "");
             Set<String> aliasSet = aliases.isBlank() ? Set.of() : Arrays.stream(aliases.split(",", -1))
                     .filter(value -> !value.isBlank()).collect(Collectors.toUnmodifiableSet());
-            channels.put(id, new ChannelDescriptor(id, properties.getProperty(key), aliasSet,
-                    Boolean.parseBoolean(properties.getProperty(prefix + "external", "false"))));
+            ChannelDescriptor descriptor = new ChannelDescriptor(id, properties.getProperty(key), aliasSet,
+                    Boolean.parseBoolean(properties.getProperty(prefix + "external", "false")));
+            if (channels.put(id, descriptor) != null) throw new IOException("duplicate channel id");
+        }
+        validateLoadedCatalog();
+    }
+
+    private void validateLoadedCatalog() throws IOException {
+        java.util.Set<String> lookupNames = new java.util.HashSet<>();
+        for (ChannelDescriptor channel : channels.values()) {
+            if (!lookupNames.add(channel.name().toLowerCase())) throw new IOException("duplicate channel name");
+            for (String alias : channel.aliases()) {
+                if (!lookupNames.add(alias.toLowerCase())) throw new IOException("duplicate channel alias");
+            }
         }
     }
 

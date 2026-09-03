@@ -85,9 +85,21 @@ Channel YAML schema 1 adds `channel_id` (canonical UUID), `schema_version`, and
 the ID and backup. A future schema aborts plugin startup without rewriting data.
 Names and aliases are display/lookup values only; integrations persist the ID.
 
-Velocity persists accepted authenticated state proposals in
-`plugins/lunachat/channels.properties` with an atomic replacement. This is the
-network authority's last-known-good channel catalog.
+Velocity owns `plugins/lunachat/channels.properties`.  It is the only channel
+definition source in a network topology: each `channel.<uuid>.name`,
+`.aliases`, and `.external` entry is distributed to every authenticated Paper
+edge. Paper never proposes, creates, migrates, or writes channel YAML in this
+mode. A Paper receives the catalog before it is eligible for network message
+delivery and acknowledges the exact snapshot; mismatches fail closed.
+
+Legacy Paper YAML is inspected only to protect an operator from an unsafe
+migration. A same-name or alias definition with a different ID rejects the
+catalog (`CHANNEL_ID_CONFLICT`); remove or reconcile the legacy definition,
+then reconnect. Standalone Paper keeps the normal YAML-owned behavior.
+
+LunaBridge in a network topology must run on Velocity and keep its Discord
+mapping there, keyed by the authority ChannelId. LunaChat has no Discord/JDA
+dependency and Paper-side mappings are not consulted in network mode.
 
 ## Explicit initial limitations
 

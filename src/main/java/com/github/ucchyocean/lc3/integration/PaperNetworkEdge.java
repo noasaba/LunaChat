@@ -49,6 +49,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private final long epoch = System.currentTimeMillis();
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicBoolean ready = new AtomicBoolean();
+    private final AtomicBoolean catalogSynchronized = new AtomicBoolean();
     private long lastHelloMillis;
     private int taskId;
 
@@ -92,7 +93,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
         Player carrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
         if (carrier == null) return;
         long nowMillis = System.currentTimeMillis();
-        if (!ready.get() || nowMillis - lastHelloMillis >= 10_000L) {
+        if (!isReady() || nowMillis - lastHelloMillis >= 10_000L) {
             send(carrier, FrameType.HELLO, null, new byte[0], Instant.now().plusSeconds(10));
             lastHelloMillis = nowMillis;
         }
@@ -123,11 +124,25 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 }
                 nodeId = assignedNode;
                 ready.set(true);
-                integration.networkReady();
-                send(player, FrameType.STATE, null, channelStates.encode(integration.channelSnapshot()), Instant.now().plusSeconds(30));
+                catalogSynchronized.set(false);
+                integration.networkConnected();
+            } else if (frame.type() == FrameType.STATE && ready.get()) {
+                java.util.List<com.github.ucchyocean.lunachat.api.ChannelDescriptor> catalog = channelStates.decode(frame.payload());
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    try {
+                        integration.applyAuthorityCatalog(catalog);
+                        catalogSynchronized.set(true);
+                        send(player, FrameType.STATE, null, channelStates.encode(catalog), Instant.now().plusSeconds(30));
+                    } catch (RuntimeException rejectedCatalog) {
+                        catalogSynchronized.set(false);
+                        ready.set(false);
+                        integration.networkUnavailable("CHANNEL_CATALOG_REJECTED");
+                        plugin.getLogger().warning("Rejected LunaChat authority catalog: " + rejectedCatalog.getMessage());
+                    }
+                });
             } else if (frame.type() == FrameType.ACK && frame.logicalMessageId() != null) {
                 outbox.acknowledge(frame.logicalMessageId());
-            } else if (frame.type() == FrameType.MESSAGE && frame.logicalMessageId() != null && ready.get()) {
+            } else if (frame.type() == FrameType.MESSAGE && frame.logicalMessageId() != null && isReady()) {
                 AcceptedMessage proposed = messages.decode(frame.payload());
                 if (!frame.logicalMessageId().equals(proposed.messageId())) {
                     throw new FrameAuthenticationException("logical identity mismatch");
@@ -138,6 +153,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             plugin.getLogger().fine("Discarded replayed LunaChat network frame");
         } catch (Exception rejected) {
             ready.set(false);
+            catalogSynchronized.set(false);
             integration.networkUnavailable("AUTHORITY_FRAME_REJECTED");
             plugin.getLogger().warning("Rejected LunaChat network frame: " + rejected.getMessage());
         }
@@ -194,7 +210,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 Instant.now().plusSeconds(30));
     }
 
-    boolean isReady() { return ready.get() && !nodeId.isBlank(); }
+    boolean isReady() { return ready.get() && catalogSynchronized.get() && !nodeId.isBlank(); }
 
     String nodeId() {
         if (!isReady()) throw new IllegalStateException("network node identity is not assigned");
@@ -208,6 +224,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
 
     @Override public void close() {
         ready.set(false);
+        catalogSynchronized.set(false);
         nodeId = "";
         if (taskId != 0) Bukkit.getScheduler().cancelTask(taskId);
         Bukkit.getMessenger().unregisterIncomingPluginChannel(plugin, CHANNEL, this);

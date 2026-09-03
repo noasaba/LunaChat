@@ -88,12 +88,14 @@ public class LunaChatBukkit extends JavaPlugin implements PluginInterface {
 
         // 変数などの初期化
         config = new LunaChatConfig(getDataFolder(), getFile());
-        try {
-            ChannelDataMigrator.migrate(getDataFolder());
-        } catch (java.io.IOException migrationFailure) {
-            getLogger().log(Level.SEVERE, "Channel data migration failed; refusing to start", migrationFailure);
-            getServer().getPluginManager().disablePlugin(this);
-            return;
+        if (!"network_edge".equals(config.getIntegrationRole())) {
+            try {
+                ChannelDataMigrator.migrate(getDataFolder());
+            } catch (java.io.IOException migrationFailure) {
+                getLogger().log(Level.SEVERE, "Channel data migration failed; refusing to start", migrationFailure);
+                getServer().getPluginManager().disablePlugin(this);
+                return;
+            }
         }
         uuidCacheData = new UUIDCacheData(getDataFolder());
         Messages.initialize(new File(getDataFolder(), "messages"), getFile(), config.getLang());

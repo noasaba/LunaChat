@@ -99,6 +99,9 @@ public abstract class Channel {
     /** integration APIからの外部投稿を許可するか */
     private boolean acceptsExternalMessages;
 
+    /** True when the definition was supplied by the Velocity authority. */
+    private boolean authorityReplica;
+
     /** チャンネルの別名 */
     private String alias;
 
@@ -1015,6 +1018,14 @@ public abstract class Channel {
         return channelId;
     }
 
+    /** Applies the fields that are owned by a network authority. */
+    void applyAuthorityDefinition(ChannelId id, String alias, boolean acceptsExternalMessages) {
+        this.channelId = id;
+        this.alias = alias;
+        this.acceptsExternalMessages = acceptsExternalMessages;
+        this.authorityReplica = true;
+    }
+
     /** @return integration APIからの投稿を許可するか */
     public boolean isAcceptsExternalMessages() {
         return acceptsExternalMessages;
@@ -1271,6 +1282,8 @@ public abstract class Channel {
      */
     public boolean save() {
 
+        if (authorityReplica) return false;
+
         // フォルダーの取得と、必要に応じて作成
         File folder = new File(
                 LunaChat.getDataFolder(), FOLDER_NAME_CHANNELS);
@@ -1305,6 +1318,8 @@ public abstract class Channel {
      * @return 削除したかどうか。
      */
     protected boolean remove() {
+
+        if (authorityReplica) return false;
 
         // フォルダーの取得
         File folder = new File(

@@ -289,6 +289,11 @@ public class BukkitEventListener implements Listener {
             if ( global == null ) {
                 global = api.createChannel(config.getGlobalChannel(), player);
             }
+            if (global == null) {
+                player.sendMessage("LunaChat channel authority is unavailable.");
+                event.setCancelled(true);
+                return;
+            }
 
             String message = event.getMessage();
 
@@ -453,6 +458,7 @@ public class BukkitEventListener implements Listener {
         if ( global == null ) {
             global = api.createChannel(gcName, ChannelMember.getChannelMember(player));
         }
+        if (global == null) return false;
 
         // デフォルト発言先が無いなら、グローバルチャンネルに設定する
         Channel dchannel = api.getDefaultChannel(player.getName());
@@ -481,6 +487,7 @@ public class BukkitEventListener implements Listener {
             if ( channel == null ) {
                 channel = api.createChannel(cname, ChannelMember.getChannelMember(player));
             }
+            if (channel == null) continue;
 
             // チャンネルのメンバーでないなら、参加する
             ChannelMember cp = ChannelMember.getChannelMember(player);

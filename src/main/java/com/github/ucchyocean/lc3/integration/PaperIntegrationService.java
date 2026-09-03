@@ -176,8 +176,14 @@ public final class PaperIntegrationService {
 
     public LunaChatIntegrationApi api() { return runtime; }
 
-    void networkReady() {
-        runtime.mutableStatus().update(NetworkState.READY, "AUTHORITY_CONNECTED");
+    void networkConnected() {
+        runtime.mutableStatus().update(NetworkState.DEGRADED, "AWAITING_CHANNEL_CATALOG");
+    }
+
+    void applyAuthorityCatalog(List<ChannelDescriptor> catalog) {
+        manager.applyAuthoritySnapshot(catalog);
+        directory.replace(channelSnapshot());
+        runtime.mutableStatus().update(NetworkState.READY, "AUTHORITY_CATALOG_SYNCHRONIZED");
     }
 
     void networkUnavailable(String diagnostic) {

@@ -20,14 +20,30 @@ Use a unique passphrase of at least 12 characters. LunaChat derives the actual
 `serverId` settings remain readable for rollback and migration, but are not
 written into new configurations.
 
+Define channels once on Velocity in `plugins/lunachat/channels.properties`
+before starting Papers. For example:
+
+```properties
+schema=1
+channel.11111111-1111-4111-8111-111111111111.name=global
+channel.11111111-1111-4111-8111-111111111111.aliases=g
+channel.11111111-1111-4111-8111-111111111111.external=true
+```
+
+The UUID is the stable ChannelId and must not be regenerated for a rename.
+Papers receive this catalog automatically; do not create or edit Paper
+`channels/*.yml` for network channels. Configure LunaBridge Discord mappings
+only on Velocity, against that ChannelId.
+
 Do not combine standalone and network bridge modes. A bridge must check role and
 capabilities and refuse to start on `NETWORK_EDGE`.
 
 ## Failure signals
 
 - LunaBridge/Discord down: LunaChat local and network chat are independent.
-- Velocity/transport down: Paper local rendering continues; edge network status
-  becomes `UNAVAILABLE`; cross-backend and integration work is not reported as success.
+- Velocity/transport down, catalog mismatch, or legacy same-name/different-ID:
+  Paper local rendering continues; edge network status becomes `UNAVAILABLE`;
+  cross-backend and integration work is not reported as success or delivered.
 - Paper down: other backends and the Velocity API continue; its bounded outbox expires.
 - Passphrase mismatch/tamper/protocol/session mismatch: warning plus session removal.
 - Replay: debug/fine discard, session retained.
