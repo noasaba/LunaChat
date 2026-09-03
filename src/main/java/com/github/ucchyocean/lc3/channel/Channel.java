@@ -421,13 +421,7 @@ public abstract class Channel {
 
         LunaChatConfig config = LunaChat.getConfig();
 
-        // 表示名
-        String name;
-        if ( source != null && !source.isEmpty() ) {
-            name = player + "@" + source;
-        } else {
-            name = player;
-        }
+        String name = displayNameForOtherSource(player, source);
 
         String maskedMessage = new String(message);
         if (!canonicalContent) {
@@ -455,6 +449,18 @@ public abstract class Channel {
         boolean sendDynmap = source == null || !source.equals("web");
         sendMessage(new ChannelMemberOther(name), maskedMessage, msgFormat, sendDynmap);
         return maskedMessage;
+    }
+
+    /**
+     * Minecraft origin namespaces are transport metadata and must never leak
+     * into a player's chat display name.  Keep this guard for legacy callers
+     * that invoke the channel API directly instead of PaperIntegrationService.
+     */
+    static String displayNameForOtherSource(String player, @Nullable String source) {
+        if (source == null || source.isEmpty() || source.equals("lunachat.minecraft")) {
+            return player;
+        }
+        return player + "@" + source;
     }
 
     /**

@@ -24,7 +24,7 @@ public class PaperIntegrationServiceTest {
         assertNull(PaperIntegrationService.displaySourceFor(external));
     }
 
-    @Test public void playerAndSystemNamespacesRemainAvailableToLegacyRendering() {
+    @Test public void minecraftPlayerNamespaceIsNotAChatDisplaySuffix() {
         AcceptedMessage player = new AcceptedMessage(UUID.randomUUID(), ChannelId.random(), "global",
                 new MessageOrigin(OriginKind.MINECRAFT, "lunachat.minecraft", "minecraft-1"),
                 new MessageAuthor.Player(UUID.randomUUID(), "player", "Player"),
@@ -32,7 +32,7 @@ public class PaperIntegrationServiceTest {
         AcceptedMessage system = new AcceptedMessage(UUID.randomUUID(), ChannelId.random(), "global",
                 new MessageOrigin(OriginKind.SYSTEM, "lunachat.system", "system-1"),
                 new MessageAuthor.System("LunaChat"), "backend", "notice", CREATED, CREATED.plusSeconds(300));
-        assertEquals("lunachat.minecraft", PaperIntegrationService.displaySourceFor(player));
+        assertNull(PaperIntegrationService.displaySourceFor(player));
         assertEquals("lunachat.system", PaperIntegrationService.displaySourceFor(system));
     }
 

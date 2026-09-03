@@ -109,9 +109,12 @@ public final class PaperIntegrationService {
         return completion;
     }
 
-    /** External namespaces identify integrations; they are not chat display suffixes. */
+    /**
+     * Origin namespaces are routing/audit metadata, not Minecraft player display
+     * suffixes.  External bridges already provide their own display name.
+     */
     static String displaySourceFor(AcceptedMessage message) {
-        return message.origin().kind() == OriginKind.EXTERNAL ? null : message.origin().namespace();
+        return message.origin().kind() == OriginKind.SYSTEM ? message.origin().namespace() : null;
     }
 
     /**

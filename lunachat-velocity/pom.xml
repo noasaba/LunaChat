@@ -6,7 +6,7 @@
   <parent>
     <groupId>com.github.ucchyocean</groupId>
     <artifactId>lunachat-parent</artifactId>
-    <version>4.0.3-SNAPSHOT</version>
+    <version>4.0.4-SNAPSHOT</version>
   </parent>
   <artifactId>lunachat-velocity</artifactId>
   <name>LunaChat Velocity</name>
