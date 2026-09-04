@@ -14,6 +14,18 @@ import java.util.Set;
 import static org.junit.Assert.*;
 
 public class AuthorityMembershipTest {
+    @Test public void replicaNeverAppliesAJoinBeforeAuthorityAcknowledgesIt() throws Exception {
+        var plugin = new LunaChatStandalone(Files.createTempDirectory("lunachat-authority-pending-test").toFile());
+        plugin.onEnable();
+        var role = LunaChatConfig.class.getDeclaredField("integrationRole");
+        role.setAccessible(true); role.set(plugin.getLunaChatConfig(), "network_edge");
+        var manager = new ChannelManager();
+        var descriptor = new ChannelDescriptor(ChannelId.random(), "global", Set.of(), true);
+        manager.applyAuthoritySnapshot(List.of(descriptor));
+        var candidate = new ChannelMemberOther("candidate");
+        assertFalse(manager.getChannel("global").requestAuthorityMembership(candidate, true).get());
+        assertFalse(manager.getChannel("global").getMembers().contains(candidate));
+    }
     @Test public void fullStateConvergesIndependentReplicasAndRestoresOfflineMembers() throws Exception {
         var plugin = new LunaChatStandalone(Files.createTempDirectory("lunachat-replicas-test").toFile());
         plugin.onEnable();

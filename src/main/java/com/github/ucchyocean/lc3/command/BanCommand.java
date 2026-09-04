@@ -96,6 +96,10 @@ public class BanCommand extends LunaChatSubCommand {
             sender.sendMessage(Messages.errmsgNoJoin());
             return true;
         }
+        if (channel.isAuthorityReplica()) {
+            sender.sendMessage("This channel is managed by Velocity; ban policy changes must be made at the authority.");
+            return true;
+        }
 
         // モデレーターかどうか確認する
         if ( !channel.hasModeratorPermission(sender) ) {

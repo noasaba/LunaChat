@@ -220,6 +220,19 @@ public class JoinCommand extends LunaChatSubCommand {
 
             // チャンネルに参加し、デフォルトの発言先に設定する
             if ( !channel.getName().equals(config.getGlobalChannel()) ) {
+                if (channel.isAuthorityReplica()) {
+                    final String confirmedChannelName = channelName;
+                    channel.requestAuthorityMembership(sender, true).thenAccept(applied -> {
+                        if (!applied) {
+                            sender.sendMessage("LunaChat membership change was not applied; authority unavailable, restricted, or changed.");
+                            return;
+                        }
+                        api.setDefaultChannel(sender.getName(), confirmedChannelName);
+                        sender.sendMessage(Messages.cmdmsgJoin(confirmedChannelName));
+                        sender.sendMessage(Messages.cmdmsgSet(confirmedChannelName));
+                    });
+                    return true;
+                }
                 channel.addMember(sender);
                 sender.sendMessage(Messages.cmdmsgJoin(channelName));
             }

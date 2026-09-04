@@ -116,6 +116,13 @@ public class OptionCommand extends LunaChatSubCommand {
 
         cname = channel.getName();
 
+        // Velocity owns all channel definition and access-policy fields for a
+        // network edge.  Never save a divergent Paper-local option.
+        if (channel.isAuthorityReplica()) {
+            sender.sendMessage("This channel is managed by Velocity; change its options at the authority.");
+            return true;
+        }
+
         // モデレーターかどうか確認する
         if ( !channel.hasModeratorPermission(sender) ) {
             sender.sendMessage(Messages.errmsgNotModerator());

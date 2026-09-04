@@ -119,6 +119,18 @@ public class LeaveCommand extends LunaChatSubCommand {
         }
 
         // チャンネルから退出する
+        if (channel.isAuthorityReplica()) {
+            final String confirmedChannelName = channelName;
+            channel.requestAuthorityMembership(sender, false).thenAccept(applied -> {
+                if (!applied) {
+                    sender.sendMessage("LunaChat membership change was not applied; authority unavailable or changed.");
+                    return;
+                }
+                api.removeDefaultChannel(sender.getName());
+                sender.sendMessage(Messages.cmdmsgLeave(confirmedChannelName));
+            });
+            return true;
+        }
         channel.removeMember(sender);
         sender.sendMessage(Messages.cmdmsgLeave(channelName));
         return true;

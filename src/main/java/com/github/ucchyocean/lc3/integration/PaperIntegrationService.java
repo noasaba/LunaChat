@@ -222,15 +222,12 @@ public final class PaperIntegrationService {
         runtime.mutableStatus().update(NetworkState.READY, "AUTHORITY_MEMBERSHIP_SYNCHRONIZED");
     }
 
-    public void requestMembership(Channel channel, ChannelMember member, boolean joined) {
+    public CompletableFuture<Boolean> requestMembership(Channel channel, ChannelMember member, boolean joined) {
         String identity = member.toString();
         if (networkEdge == null || identity == null || !identity.startsWith("$")) {
-            member.sendMessage("LunaChat membership authority is unavailable."); return;
+            return CompletableFuture.completedFuture(false);
         }
-        networkEdge.requestMembership(channel.getChannelId(), UUID.fromString(identity.substring(1)), joined)
-                .thenAccept(applied -> member.sendMessage(applied
-                        ? "LunaChat membership updated: " + channel.getName()
-                        : "LunaChat membership change was not applied; authority unavailable, restricted, or changed. Retry after synchronization."));
+        return networkEdge.requestMembership(channel.getChannelId(), UUID.fromString(identity.substring(1)), joined);
     }
 
     void networkUnavailable(String diagnostic) {

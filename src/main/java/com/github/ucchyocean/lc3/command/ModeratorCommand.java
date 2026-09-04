@@ -104,6 +104,10 @@ public class ModeratorCommand extends LunaChatSubCommand {
             sender.sendMessage(Messages.errmsgNotExist());
             return true;
         }
+        if (channel.isAuthorityReplica()) {
+            sender.sendMessage("This channel is managed by Velocity; moderator changes must be made at the authority.");
+            return true;
+        }
 
         cname = channel.getName();
 

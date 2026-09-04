@@ -115,6 +115,21 @@ public class KickCommand extends LunaChatSubCommand {
         }
 
         // キック実行
+        if (channel.isAuthorityReplica()) {
+            final String confirmedKickedName = kickedName;
+            final Channel confirmedChannel = channel;
+            final ChannelMember confirmedKicked = kicked;
+            channel.requestAuthorityMembership(kicked, false).thenAccept(applied -> {
+                if (!applied) {
+                    sender.sendMessage("LunaChat membership change was not applied; authority unavailable or changed.");
+                    return;
+                }
+                sender.sendMessage(Messages.cmdmsgKick(confirmedKickedName, confirmedChannel.getName()));
+                confirmedChannel.sendSystemMessage(Messages.kickMessage(confirmedChannel.getColorCode(), confirmedChannel.getName(), confirmedKicked), true, "system");
+                if (confirmedKicked.isOnline()) confirmedKicked.sendMessage(Messages.cmdmsgKicked(confirmedChannel.getName()));
+            });
+            return true;
+        }
         channel.removeMember(kicked);
         channel.save();
 

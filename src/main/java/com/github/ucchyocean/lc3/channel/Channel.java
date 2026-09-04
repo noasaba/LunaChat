@@ -554,8 +554,11 @@ public abstract class Channel {
         // メンバー更新
         if (authorityReplica) {
             var integration = com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
-            if (integration != null) integration.requestMembership(this, player, true);
-            else player.sendMessage("LunaChat membership authority is unavailable.");
+            (integration == null ? java.util.concurrent.CompletableFuture.<Boolean>completedFuture(false)
+                    : integration.requestMembership(this, player, true)).thenAccept(applied -> {
+                if (applied) player.sendMessage(Messages.joinMessage(getColorCode(), getName(), player.getName()));
+                else player.sendMessage("LunaChat membership change was not applied; authority unavailable, restricted, or changed.");
+            });
             return;
         }
         if ( members.size() == 0 && moderator.size() == 0 ) {
@@ -594,8 +597,17 @@ public abstract class Channel {
         // デフォルト発言先が退出するチャンネルと一致する場合、
         if (authorityReplica) {
             var integration = com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
-            if (integration != null) integration.requestMembership(this, player, false);
-            else player.sendMessage("LunaChat membership authority is unavailable.");
+            (integration == null ? java.util.concurrent.CompletableFuture.<Boolean>completedFuture(false)
+                    : integration.requestMembership(this, player, false)).thenAccept(applied -> {
+                if (!applied) {
+                    player.sendMessage("LunaChat membership change was not applied; authority unavailable or changed.");
+                    return;
+                }
+                LunaChatAPI api = LunaChat.getAPI();
+                Channel def = api.getDefaultChannel(player.getName());
+                if (def != null && def.getName().equals(getName())) api.removeDefaultChannel(player.getName());
+                player.sendMessage(Messages.quitMessage(getColorCode(), getName(), player.getName()));
+            });
             return;
         }
         // デフォルト発言先を削除する
@@ -1048,6 +1060,24 @@ public abstract class Channel {
         if (!authorityReplica) throw new IllegalStateException("not an authority replica");
         members = new ArrayList<>(authoritative);
         moderator.retainAll(members);
+    }
+
+    /** Whether this channel is a read-only definition supplied by Velocity. */
+    public boolean isAuthorityReplica() { return authorityReplica; }
+
+    /** Requests a membership change without applying any local replica state. */
+    public java.util.concurrent.CompletableFuture<Boolean> requestAuthorityMembership(ChannelMember player, boolean joined) {
+        if (!authorityReplica) return java.util.concurrent.CompletableFuture.completedFuture(false);
+        if (members.contains(player) == joined) return java.util.concurrent.CompletableFuture.completedFuture(true);
+        ArrayList<ChannelMember> after = new ArrayList<ChannelMember>(members);
+        if (joined) after.add(player); else after.remove(player);
+        EventResult membershipEvent = LunaChat.getEventSender() == null ? null
+                : LunaChat.getEventSender().sendLunaChatChannelMemberChangedEvent(name, members, after);
+        if (membershipEvent != null && membershipEvent.isCancelled())
+            return java.util.concurrent.CompletableFuture.completedFuture(false);
+        var integration = com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
+        if (integration == null) return java.util.concurrent.CompletableFuture.completedFuture(false);
+        return integration.requestMembership(this, player, joined);
     }
 
     /** @return integration APIからの投稿を許可するか */

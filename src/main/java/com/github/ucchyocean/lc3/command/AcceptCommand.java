@@ -110,6 +110,18 @@ public class AcceptCommand extends LunaChatSubCommand {
         }
 
         // 参加する
+        if (channel.isAuthorityReplica()) {
+            channel.requestAuthorityMembership(sender, true).thenAccept(applied -> {
+                if (!applied) {
+                    sender.sendMessage("LunaChat membership change was not applied; authority unavailable, restricted, or changed.");
+                    return;
+                }
+                api.setDefaultChannel(sender.getName(), channelName);
+                sender.sendMessage(Messages.cmdmsgJoin(channel.getName()));
+                sender.sendMessage(Messages.cmdmsgSet(channel.getName()));
+            });
+            return true;
+        }
         channel.addMember(sender);
         sender.sendMessage(Messages.cmdmsgJoin(channel.getName()));
 

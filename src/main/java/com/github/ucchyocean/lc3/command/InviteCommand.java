@@ -190,6 +190,20 @@ public class InviteCommand extends LunaChatSubCommand {
         }
 
         // 参加する
+        if (channel.isAuthorityReplica()) {
+            final String confirmedInvitedName = invitedName;
+            final String confirmedChannelName = cname;
+            channel.requestAuthorityMembership(invited, true).thenAccept(applied -> {
+                if (!applied) {
+                    sender.sendMessage("LunaChat membership change was not applied; authority unavailable, restricted, or changed.");
+                    return;
+                }
+                api.setDefaultChannel(confirmedInvitedName, confirmedChannelName);
+                sender.sendMessage(Messages.cmdmsgInvite(confirmedInvitedName, channel.getName()));
+                invited.sendMessage(Messages.cmdmsgJoin(channel.getName()));
+            });
+            return true;
+        }
         channel.addMember(invited);
         api.setDefaultChannel(invitedName, cname);
         sender.sendMessage(Messages.cmdmsgInvite(invitedName, channel.getName()));

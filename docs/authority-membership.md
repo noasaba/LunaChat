@@ -1,4 +1,4 @@
-# Authority membership (4.0.8-SNAPSHOT / wire 3)
+# Authority membership (4.0.9-SNAPSHOT / wire 3)
 
 Status: implementation and automated-test candidate, not yet approved for deployment.
 
@@ -43,15 +43,18 @@ Restore catalog and membership from the same coordinated backup for rollback.
   failure rejects the mutation; there is no silent eviction or tombstone pruning.
 - The seed enables fresh joins only for reviewed open channels. Restricted
   channel access rules, moderator roles, bans and mutes are NOT migrated here.
-- Paper commands still have synchronous success/default-channel side effects.
-  These must be made authority-acknowledgement-aware before production release.
-- Cross-backend ban/mute/access-policy convergence remains outside this
-  membership-only schema. Do not deploy as a replacement for those protections.
+- Join, accept, leave, force-invite and kick defer their success/default update
+  until the authority reply. A rejected or timed-out change leaves the local
+  replica and default channel untouched.
+- Paper rejects option, moderator, ban/pardon and mute/unmute changes for a
+  replicated channel. This is deliberately fail-closed: current Velocity
+  authority configuration has no management command/API for those policies, so
+  accepting a local edit would create a cross-server security split.
 - Public integration API stays 1.0.0-SNAPSHOT; no SVSync, SuperVanish or LunaBridge
   dependency is added. Paper `Player#canSee()` logic remains unchanged.
 - Automated delivery tests run the real public external API, BukkitChannel and
   modern/legacy event adapters against simulated local Bukkit players. They
   verify send calls, not Minecraft client-rendered UI or live Discord delivery.
 
-Release gate: resolve command acknowledgement and access-policy semantics,
-then execute the real two-backend movement/restart/Discord integration test.
+Release gate: add Velocity-side management for private/moderator/ban/mute
+policies, then execute the real two-backend movement/restart/Discord integration test.
