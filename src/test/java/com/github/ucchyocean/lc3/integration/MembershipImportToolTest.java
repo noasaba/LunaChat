@@ -25,8 +25,13 @@ public class MembershipImportToolTest {
         Files.writeString(source, yaml.replace(id, UUID.randomUUID().toString()));
         assertThrows(java.io.IOException.class, () -> MembershipImportTool.export(dir, catalog, dir.resolve("bad.properties")));
         assertFalse(Files.exists(dir.resolve("bad.properties")));
-        Files.writeString(source, yaml.replace("password: ''", "password: 'secret'"));
-        assertThrows(java.io.IOException.class, () -> MembershipImportTool.export(dir, catalog, dir.resolve("private.properties")));
-        assertFalse(Files.exists(dir.resolve("private.properties")));
+        Files.writeString(source, yaml.replace("password: ''", "password: 'secret'")
+                .replace("banned: []", "banned:\n- '$" + player + "'\nmoderator:\n- '$" + player + "'\nmuted:\n- '$" + player + "'"));
+        var privateOutput = dir.resolve("private.properties");
+        MembershipImportTool.export(dir, catalog, privateOutput);
+        try (var stream = Files.newInputStream(privateOutput)) { seed.clear(); seed.load(stream); }
+        assertEquals("secret", seed.getProperty("channel." + id + ".password"));
+        assertEquals(player, seed.getProperty("channel." + id + ".banned"));
+        assertEquals("false", seed.getProperty("channel." + id + ".joinable"));
     }
 }

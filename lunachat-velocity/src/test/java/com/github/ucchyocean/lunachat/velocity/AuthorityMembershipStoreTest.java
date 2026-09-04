@@ -84,4 +84,40 @@ class AuthorityMembershipStoreTest {
                 () -> store.change(new Change(new Key(channel.id(), player), false, 1)));
         assertEquals(before, store.snapshot());
     }
+    @Test void velocityPolicyFileOverridesSeedAndPersistsForPaperSnapshots() throws Exception {
+        seed(true);
+        UUID moderator = UUID.randomUUID(), banned = UUID.randomUUID(), muted = UUID.randomUUID();
+        String prefix = "channel." + channel.id().value() + ".";
+        Files.writeString(directory.resolve("membership-policy.properties"), "schema=1\n"
+                + prefix + "password=private\n" + prefix + "visible=false\n" + prefix + "world=true\n"
+                + prefix + "moderators=" + moderator + "\n" + prefix + "banned=" + banned + "\n"
+                + prefix + "muted=" + muted + "\n" + prefix + "ban_expires=" + banned + "@123\n"
+                + prefix + "mute_expires=" + muted + "@456\n");
+        var store = new AuthorityMembershipStore(directory, catalog());
+        var policy = store.snapshot().policies().getFirst();
+        assertEquals("private", policy.password()); assertFalse(policy.visible()); assertTrue(policy.worldRange());
+        assertEquals(Set.of(moderator), policy.moderators()); assertEquals(Map.of(banned, 123L), policy.banExpires());
+        long revision = store.snapshot().revision();
+        store = new AuthorityMembershipStore(directory, catalog());
+        assertEquals(revision, store.snapshot().revision(), "unchanged Velocity policy does not churn state");
+    }
+    @Test void incompleteVelocityPolicyFailsClosedWithoutReplacingDurableState() throws Exception {
+        seed(true); new AuthorityMembershipStore(directory, catalog());
+        byte[] before = Files.readAllBytes(directory.resolve("membership-state.bin"));
+        Files.writeString(directory.resolve("membership-policy.properties"), "schema=1\n"
+                + "channel." + channel.id().value() + ".visible=false\n");
+        assertThrows(java.io.IOException.class, () -> new AuthorityMembershipStore(directory, catalog()));
+        assertArrayEquals(before, Files.readAllBytes(directory.resolve("membership-state.bin")));
+    }
+    @Test void malformedPolicyExpiryFailsAsIOExceptionAndKeepsPreviousState() throws Exception {
+        seed(true); new AuthorityMembershipStore(directory, catalog());
+        byte[] before = Files.readAllBytes(directory.resolve("membership-state.bin"));
+        String prefix = "channel." + channel.id().value() + ".";
+        Files.writeString(directory.resolve("membership-policy.properties"), "schema=1\n"
+                + prefix + "password=\n" + prefix + "visible=true\n" + prefix + "world=false\n"
+                + prefix + "moderators=\n" + prefix + "banned=" + player + "\n" + prefix + "muted=\n"
+                + prefix + "ban_expires=" + player + "\n" + prefix + "mute_expires=\n");
+        assertThrows(java.io.IOException.class, () -> new AuthorityMembershipStore(directory, catalog()));
+        assertArrayEquals(before, Files.readAllBytes(directory.resolve("membership-state.bin")));
+    }
 }

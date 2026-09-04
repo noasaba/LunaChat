@@ -1062,6 +1062,22 @@ public abstract class Channel {
         moderator.retainAll(members);
     }
 
+    void applyAuthorityPolicy(com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Policy policy) {
+        if (!authorityReplica) throw new IllegalStateException("not an authority replica");
+        password = policy.password(); visible = policy.visible(); isWorldRange = policy.worldRange();
+        moderator = memberList(policy.moderators()); banned = memberList(policy.banned()); muted = memberList(policy.muted());
+        banExpires = expiryMap(policy.banExpires()); muteExpires = expiryMap(policy.muteExpires());
+    }
+    private static List<ChannelMember> memberList(java.util.Set<java.util.UUID> ids) {
+        return ids.stream().map(com.github.ucchyocean.lc3.member.ChannelMemberPlayer::new)
+                .map(member -> (ChannelMember) member).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    }
+    private static java.util.Map<ChannelMember, Long> expiryMap(java.util.Map<java.util.UUID, Long> expiry) {
+        java.util.Map<ChannelMember, Long> result = new java.util.HashMap<>();
+        expiry.forEach((id, time) -> result.put(new com.github.ucchyocean.lc3.member.ChannelMemberPlayer(id), time));
+        return result;
+    }
+
     /** Whether this channel is a read-only definition supplied by Velocity. */
     public boolean isAuthorityReplica() { return authorityReplica; }
 

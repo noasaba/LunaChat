@@ -42,22 +42,25 @@ public final class MembershipImportTool {
                 data = map;
             } catch (RuntimeException malformed) { throw new IOException("invalid channel YAML", malformed); }
             if (!id.equals(data.get("channel_id"))) throw new IOException("canonical channel ID mismatch: " + name);
-            // Restricted channels need a richer access-policy migration. Never
-            // turn a password/world/ban restricted channel into an open replica.
-            if (!Boolean.TRUE.equals(data.get("visible")) || !"".equals(data.get("password"))
-                    || !Boolean.FALSE.equals(data.get("world")) || !emptyList(data.get("banned")))
-                throw new IOException("restricted channel requires explicit access-policy migration: " + name);
-            if (!(data.get("members") instanceof List<?> members)) throw new IOException("invalid members list");
-            Set<String> ids = new LinkedHashSet<>();
-            for (Object member : members) {
-                if (!(member instanceof String value) || !value.startsWith("$"))
-                    throw new IOException("non-player member requires explicit migration");
-                String uuid = value.substring(1);
-                if (!UUID.fromString(uuid).toString().equals(uuid) || !ids.add(uuid))
-                    throw new IOException("invalid or duplicate member UUID");
-            }
-            seed.setProperty("channel." + id + ".members", String.join(",", ids));
-            seed.setProperty("channel." + id + ".joinable", "true");
+            Set<String> members = playerIds(data.get("members"));
+            Set<String> moderators = playerIds(data.get("moderator"));
+            Set<String> banned = playerIds(data.get("banned"));
+            Set<String> muted = playerIds(data.get("muted"));
+            String prefix = "channel." + id + ".";
+            seed.setProperty(prefix + "members", String.join(",", members));
+            // Only a plainly open channel permits a fresh voluntary join. An
+            // imported private/world/banned channel retains its access state.
+            boolean open = Boolean.TRUE.equals(data.get("visible")) && "".equals(data.get("password"))
+                    && Boolean.FALSE.equals(data.get("world")) && banned.isEmpty();
+            seed.setProperty(prefix + "joinable", Boolean.toString(open));
+            seed.setProperty(prefix + "moderators", String.join(",", moderators));
+            seed.setProperty(prefix + "banned", String.join(",", banned));
+            seed.setProperty(prefix + "muted", String.join(",", muted));
+            seed.setProperty(prefix + "password", string(data.get("password")));
+            seed.setProperty(prefix + "visible", Boolean.toString(Boolean.TRUE.equals(data.get("visible"))));
+            seed.setProperty(prefix + "world", Boolean.toString(Boolean.TRUE.equals(data.get("world"))));
+            seed.setProperty(prefix + "ban_expires", expiry(data.get("ban_expires"), banned));
+            seed.setProperty(prefix + "mute_expires", expiry(data.get("mute_expires"), muted));
             imported++;
         }
         if (imported == 0) throw new IOException("no canonical source channels found; refusing empty migration");
@@ -66,5 +69,29 @@ public final class MembershipImportTool {
         }
     }
 
-    private static boolean emptyList(Object value) { return value instanceof List<?> list && list.isEmpty(); }
+    private static Set<String> playerIds(Object value) throws IOException {
+        if (value == null) return Set.of();
+        if (!(value instanceof List<?> list)) throw new IOException("invalid player list");
+        Set<String> result = new LinkedHashSet<>();
+        for (Object member : list) {
+            if (!(member instanceof String text) || !text.startsWith("$")) throw new IOException("non-player member requires explicit migration");
+            String uuid = text.substring(1);
+            if (!UUID.fromString(uuid).toString().equals(uuid) || !result.add(uuid)) throw new IOException("invalid or duplicate player UUID");
+        }
+        return result;
+    }
+    private static String expiry(Object value, Set<String> allowed) throws IOException {
+        if (!(value instanceof Map<?, ?> values)) return "";
+        List<String> result = new ArrayList<>();
+        for (var entry : values.entrySet()) {
+            if (!(entry.getKey() instanceof String member) || !member.startsWith("$") || !allowed.contains(member.substring(1))
+                    || !(entry.getValue() instanceof Number time) || time.longValue() <= 0) throw new IOException("invalid expiry");
+            result.add(member.substring(1) + "@" + time.longValue());
+        }
+        return String.join(",", result);
+    }
+    private static String string(Object value) throws IOException {
+        if (value == null) return "";
+        if (!(value instanceof String text) || text.length() > 64) throw new IOException("invalid password"); return text;
+    }
 }

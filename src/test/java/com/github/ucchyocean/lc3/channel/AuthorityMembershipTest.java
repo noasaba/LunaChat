@@ -9,6 +9,7 @@ import org.junit.Test;
 
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.Assert.*;
@@ -51,6 +52,25 @@ public class AuthorityMembershipTest {
         assertTrue(first.getChannel("global").getMembers().isEmpty());
         assertTrue(second.getChannel("global").getMembers().isEmpty());
         assertTrue(reconnected.getChannel("global").getMembers().isEmpty());
+    }
+    @Test public void authorityPolicyReplacesPaperLocalAccessState() throws Exception {
+        var plugin = new LunaChatStandalone(Files.createTempDirectory("lunachat-policy-replica-test").toFile());
+        plugin.onEnable();
+        var role = LunaChatConfig.class.getDeclaredField("integrationRole");
+        role.setAccessible(true); role.set(plugin.getLunaChatConfig(), "network_edge");
+        var manager = new ChannelManager(); var descriptor = new ChannelDescriptor(ChannelId.random(), "private", Set.of(), true);
+        java.util.UUID moderator = java.util.UUID.randomUUID();
+        java.util.UUID banned = java.util.UUID.randomUUID();
+        java.util.UUID muted = java.util.UUID.randomUUID();
+        var policy = new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Policy(descriptor.id(),
+                Set.of(moderator), Set.of(banned), Set.of(muted), Map.of(banned, 11L), Map.of(muted, 12L), "secret", false, true);
+        manager.applyAuthoritySnapshot(new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot(
+                1, List.of(descriptor), List.of(), Set.of(), List.of(policy)));
+        var channel = manager.getChannel("private");
+        assertEquals("secret", channel.getPassword()); assertFalse(channel.isVisible()); assertTrue(channel.isWorldRange());
+        assertTrue(channel.getModerator().contains(new com.github.ucchyocean.lc3.member.ChannelMemberPlayer(moderator)));
+        assertTrue(channel.getBanned().contains(new com.github.ucchyocean.lc3.member.ChannelMemberPlayer(banned)));
+        assertTrue(channel.getMuted().contains(new com.github.ucchyocean.lc3.member.ChannelMemberPlayer(muted)));
     }
     @Test public void identicalCatalogReapplicationPreservesLocalMembership() throws Exception {
         var plugin = new LunaChatStandalone(Files.createTempDirectory("lunachat-membership-test").toFile());

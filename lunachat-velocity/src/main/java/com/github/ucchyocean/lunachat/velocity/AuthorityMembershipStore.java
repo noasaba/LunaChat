@@ -25,7 +25,7 @@ final class AuthorityMembershipStore {
                 Set<ChannelId> ids = new HashSet<>(); catalog.forEach(c -> ids.add(c.id()));
                 if (state.channels().stream().anyMatch(c -> !ids.contains(c.id())))
                     throw new IOException("canonical channel removed or replaced: explicit membership migration required");
-                Snapshot updated = new Snapshot(state.revision() + 1, catalog, state.members(), state.joinable());
+                Snapshot updated = new Snapshot(state.revision() + 1, catalog, state.members(), state.joinable(), state.policies());
                 persist(updated); state = updated;
             }
         } else {
@@ -51,11 +51,27 @@ final class AuthorityMembershipStore {
                         String value = input.getProperty(key);
                         if (!value.equals("true") && !value.equals("false")) throw new IOException("invalid join policy");
                         if (value.equals("true")) joinable.add(id);
-                    } else throw new IOException("unknown import field");
+                    } else if (!Set.of("moderators", "banned", "muted", "ban_expires", "mute_expires", "password", "visible", "world").contains(parts[2])) {
+                        throw new IOException("unknown import field");
+                    }
                 }
-                state = new Snapshot(1, catalog, members, joinable);
+                state = new Snapshot(1, catalog, members, joinable, policies(input, catalog));
                 persist(state);
             } catch (IllegalArgumentException invalid) { throw new IOException("invalid membership import", invalid); }
+        }
+        // This Velocity-only file is the ongoing management surface. It is
+        // optional; when present it atomically replaces policy fields only,
+        // never membership imported from a Paper backend.
+        Path policyFile = directory.resolve("membership-policy.properties");
+        if (Files.exists(policyFile)) {
+            Properties policyInput = new Properties();
+            try (var stream = Files.newInputStream(policyFile)) { policyInput.load(stream); }
+            if (!"1".equals(policyInput.getProperty("schema"))) throw new IOException("invalid policy schema");
+            List<Policy> policy = policies(policyInput, catalog, true);
+            if (!policy.equals(state.policies())) {
+                Snapshot updated = new Snapshot(state.revision() + 1, state.channels(), state.members(), state.joinable(), policy);
+                persist(updated); state = updated;
+            }
         }
     }
     synchronized Snapshot snapshot() { return state; }
@@ -69,8 +85,51 @@ final class AuthorityMembershipStore {
         if (change.joined() && !state.joinable().contains(change.key().channel())) return "JOIN_DISABLED";
         List<Member> next = new ArrayList<>(state.members()); next.removeIf(m -> m.key().equals(change.key()));
         next.add(new Member(change.key(), change.joined(), state.revision() + 1));
-        Snapshot proposal = new Snapshot(state.revision() + 1, state.channels(), next, state.joinable());
+        Snapshot proposal = new Snapshot(state.revision() + 1, state.channels(), next, state.joinable(), state.policies());
         persist(proposal); state = proposal; return "APPLIED";
+    }
+    private static List<Policy> policies(Properties input, List<ChannelDescriptor> catalog) throws IOException {
+        return policies(input, catalog, false);
+    }
+    private static List<Policy> policies(Properties input, List<ChannelDescriptor> catalog, boolean requireComplete) throws IOException {
+        List<Policy> result = new ArrayList<>();
+        for (ChannelDescriptor channel : catalog) {
+            String prefix = "channel." + channel.id().value() + ".";
+            if (requireComplete) for (String field : List.of("moderators", "banned", "muted", "ban_expires", "mute_expires", "password", "visible", "world"))
+                if (!input.containsKey(prefix + field)) throw new IOException("incomplete Velocity policy file for " + channel.id());
+            Set<UUID> moderators = ids(input, prefix + "moderators");
+            Set<UUID> banned = ids(input, prefix + "banned");
+            Set<UUID> muted = ids(input, prefix + "muted");
+            Map<UUID, Long> banExpires = expiry(input, prefix + "ban_expires", banned);
+            Map<UUID, Long> muteExpires = expiry(input, prefix + "mute_expires", muted);
+            String password = input.getProperty(prefix + "password", "");
+            boolean visible = bool(input, prefix + "visible", true);
+            boolean world = bool(input, prefix + "world", false);
+            if (!moderators.isEmpty() || !banned.isEmpty() || !muted.isEmpty() || !password.isEmpty() || !visible || world)
+                result.add(new Policy(channel.id(), moderators, banned, muted, banExpires, muteExpires, password, visible, world));
+        }
+        return result;
+    }
+    private static Set<UUID> ids(Properties input, String key) throws IOException {
+        String value = input.getProperty(key, "").trim(); Set<UUID> result = new LinkedHashSet<>();
+        try { if (!value.isEmpty()) for (String text : value.split(",")) if (!result.add(UUID.fromString(text.trim()))) throw new IOException("duplicate policy UUID"); }
+        catch (IllegalArgumentException invalid) { throw new IOException("invalid policy UUID", invalid); }
+        return result;
+    }
+    private static Map<UUID, Long> expiry(Properties input, String key, Set<UUID> allowed) throws IOException {
+        String value = input.getProperty(key, "").trim(); Map<UUID, Long> result = new LinkedHashMap<>();
+        try { if (!value.isEmpty()) for (String pair : value.split(",")) {
+            String[] parts=pair.split("@", -1);
+            if (parts.length != 2) throw new IOException("invalid policy expiry");
+            UUID id=UUID.fromString(parts[0]); long time=Long.parseLong(parts[1]);
+            if (!allowed.contains(id) || time<=0 || result.put(id,time)!=null) throw new IOException("invalid policy expiry");
+        } }
+        catch (IllegalArgumentException invalid) { throw new IOException("invalid policy expiry", invalid); }
+        return result;
+    }
+    private static boolean bool(Properties input, String key, boolean fallback) throws IOException {
+        String value=input.getProperty(key); if(value==null) return fallback;
+        if(!value.equals("true") && !value.equals("false")) throw new IOException("invalid policy boolean"); return Boolean.parseBoolean(value);
     }
     private void persist(Snapshot next) throws IOException {
         final byte[] bytes;

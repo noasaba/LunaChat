@@ -534,6 +534,9 @@ public class ChannelManager implements LunaChatAPI {
                     .map(m -> (ChannelMember) new com.github.ucchyocean.lc3.member.ChannelMemberPlayer(m.key().player()))
                     .toList();
             channel.applyAuthorityMembers(members);
+            var policy = snapshot.policies().stream().filter(p -> p.channel().equals(channel.getChannelId())).findFirst()
+                    .orElse(com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Policy.open(channel.getChannelId()));
+            channel.applyAuthorityPolicy(policy);
         }
     }
 

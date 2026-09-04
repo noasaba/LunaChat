@@ -1,14 +1,43 @@
-# Authority membership (4.0.9-SNAPSHOT / wire 3)
+# Authority membership (4.0.10-SNAPSHOT / wire 3)
 
-Status: implementation and automated-test candidate, not yet approved for deployment.
+Status: implementation and automated-test candidate. Live two-Paper/Discord
+verification remains required before deployment.
 
-Velocity persists UUID membership in `membership-state.bin` beside its canonical
-`channels.properties`. Paper uses full read-only snapshots, never unions local
-YAML members. Join/leave requests use per-member compare-and-set versions.
+Velocity persists UUID membership and access policy in `membership-state.bin`
+beside its canonical `channels.properties`. Paper uses full read-only snapshots,
+never unions local YAML members. Join/leave requests use per-member
+compare-and-set versions.
 Leave/kick tombstones survive restarts and reject old join requests. Persistence
 finishes before success is acknowledged; failures retain the previous state.
 Repeated snapshots do not duplicate members. Offline UUIDs remain members and
 the Bukkit recipient loop resolves only locally online players.
+
+## Velocity policy management
+
+For network mode, Velocity is the only policy editor. Create
+`membership-policy.properties` beside `channels.properties` and restart the
+Velocity plugin/proxy to apply it. It has `schema=1` and must contain every
+field for every canonical channel; an incomplete file aborts startup rather
+than silently opening a private channel.
+
+```properties
+schema=1
+channel.<canonical-uuid>.password=
+channel.<canonical-uuid>.visible=true
+channel.<canonical-uuid>.world=false
+channel.<canonical-uuid>.moderators=
+channel.<canonical-uuid>.banned=
+channel.<canonical-uuid>.muted=
+channel.<canonical-uuid>.ban_expires=
+channel.<canonical-uuid>.mute_expires=
+```
+
+Player lists are comma-separated UUIDs. Expiry entries are `uuid@epochMillis`
+and must name an entry in the corresponding banned/muted list. This file is
+read only by Velocity, persisted into the signed network state, and replicated
+to Paper. Passwords are already plain-text LunaChat channel configuration;
+restrict this Velocity data directory accordingly. Paper rejects all policy
+edits in network mode, including option/moderator/ban/pardon/mute/unmute.
 
 ## One-time migration
 
@@ -24,9 +53,11 @@ java -cp '/path/LunaChat.jar:/path/snakeyaml-2.2.jar' \
   /staging/membership-import.properties
 ```
 
-The exporter verifies every selected channel's canonical UUID, refuses restricted
-(password/world/private/banned) channels, and refuses overwriting its output.
-It does not modify the source. Review the output before installation. Place it
+The exporter verifies every selected channel's canonical UUID and exports its
+members, password/visible/world setting, moderators, bans/mutes and expiries.
+It refuses overwriting its output and never modifies the source. It imports one
+selected Paper only; it never unions another backend. Review the output before
+installation. Place it
 beside Velocity's `channels.properties` BEFORE the first wire-3 startup.
 Update all Paper and Velocity JARs together; wire 2 is incompatible.
 
@@ -41,20 +72,19 @@ Restore catalog and membership from the same coordinated backup for rollback.
 
 - Full snapshots must fit 60,000 bytes, including retained tombstones. Capacity
   failure rejects the mutation; there is no silent eviction or tombstone pruning.
-- The seed enables fresh joins only for reviewed open channels. Restricted
-  channel access rules, moderator roles, bans and mutes are NOT migrated here.
+- The seed enables fresh joins only for plainly open channels. Private/world/
+  banned channels retain imported membership and policy but do not gain fresh
+  voluntary joins.
 - Join, accept, leave, force-invite and kick defer their success/default update
   until the authority reply. A rejected or timed-out change leaves the local
   replica and default channel untouched.
 - Paper rejects option, moderator, ban/pardon and mute/unmute changes for a
-  replicated channel. This is deliberately fail-closed: current Velocity
-  authority configuration has no management command/API for those policies, so
-  accepting a local edit would create a cross-server security split.
+  replicated channel. Use the Velocity-only policy file above, then restart
+  the authority; accepting a local Paper edit would create a security split.
 - Public integration API stays 1.0.0-SNAPSHOT; no SVSync, SuperVanish or LunaBridge
   dependency is added. Paper `Player#canSee()` logic remains unchanged.
 - Automated delivery tests run the real public external API, BukkitChannel and
   modern/legacy event adapters against simulated local Bukkit players. They
   verify send calls, not Minecraft client-rendered UI or live Discord delivery.
 
-Release gate: add Velocity-side management for private/moderator/ban/mute
-policies, then execute the real two-backend movement/restart/Discord integration test.
+Release gate: execute the real two-backend movement/restart/Discord integration test.

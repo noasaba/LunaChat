@@ -10,7 +10,10 @@ class AuthoritySnapshotCodecTest {
     @Test void roundTripPreservesMembersAndExitTombstones() throws Exception {
         var channel = new ChannelDescriptor(ChannelId.random(), "global", Set.of(), true);
         var key = new Key(channel.id(), UUID.randomUUID());
-        var state = new Snapshot(3, List.of(channel), List.of(new Member(key, false, 3)), Set.of(channel.id()));
+        var player = UUID.randomUUID();
+        var policy = new Policy(channel.id(), Set.of(player), Set.of(player), Set.of(player),
+                Map.of(player, 123L), Map.of(player, 456L), "private", false, true);
+        var state = new Snapshot(3, List.of(channel), List.of(new Member(key, false, 3)), Set.of(channel.id()), List.of(policy));
         var codec = new AuthoritySnapshotCodec();
         assertEquals(state, codec.decode(codec.encode(state)));
         var change = new Change(key, true, 3);
