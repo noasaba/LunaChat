@@ -25,10 +25,10 @@ import java.util.Base64;
 import java.util.Optional;
 import java.util.Properties;
 
-@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.7-SNAPSHOT",
+@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.8-SNAPSHOT",
         description = "LunaChat network authority for Velocity 4.1")
 public final class LunaChatVelocity implements LunaChatApiProvider {
-    public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("lunachat", "network_v2");
+    public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("lunachat", "network_v3");
     private final ProxyServer proxy;
     private final Logger logger;
     private final Path dataDirectory;
@@ -53,7 +53,7 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
             AuthorityChannelStore store = new AuthorityChannelStore(dataDirectory);
             authority = new VelocityNetworkAuthority(proxy, logger, CHANNEL, store, secret, pending, receipts);
             networkTask = proxy.getScheduler().buildTask(this, authority::tick).repeat(Duration.ofSeconds(1)).schedule();
-            logger.info("LunaChat network authority ready (API {}, wire 2)", authority.runtime().apiVersion());
+            logger.info("LunaChat network authority ready (API {}, wire 3)", authority.runtime().apiVersion());
         } catch (Exception failure) {
             logger.error("LunaChat authority failed closed during initialization", failure);
             authority = null;

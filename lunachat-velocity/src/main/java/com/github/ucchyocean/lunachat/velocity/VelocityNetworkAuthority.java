@@ -5,6 +5,7 @@ import com.github.ucchyocean.lunachat.core.InMemoryChannelDirectory;
 import com.github.ucchyocean.lunachat.core.IntegrationRuntime;
 import com.github.ucchyocean.lunachat.core.network.AcceptedMessageCodec;
 import com.github.ucchyocean.lunachat.core.network.ChannelStateCodec;
+import com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec;
 import com.github.ucchyocean.lunachat.core.network.FrameAuthenticationException;
 import com.github.ucchyocean.lunachat.core.network.FrameType;
 import com.github.ucchyocean.lunachat.core.network.ReliableOutbox;
@@ -33,17 +34,18 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Velocity network authority and authenticated routing state machine. */
 final class VelocityNetworkAuthority implements AutoCloseable {
-    private record Session(UUID id, long epoch, boolean catalogSynchronized) {}
+    private record Session(UUID id, long epoch, long revision) {}
     private record PendingExternal(AcceptedMessage message, CompletableFuture<AcceptedMessage> completion) {}
     private enum LogicalAdmission { NEW, PENDING, DUPLICATE, FULL }
     private final ProxyServer proxy;
     private final Logger logger;
     private final ChannelIdentifier channel;
     private final AuthorityChannelStore store;
+    private final AuthorityMembershipStore memberships;
     private final InMemoryChannelDirectory directory = new InMemoryChannelDirectory();
     private final SecureFrameCodec secure;
     private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
-    private final ChannelStateCodec channelStates = new ChannelStateCodec();
+    private final AuthoritySnapshotCodec channelStates = new AuthoritySnapshotCodec();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, ReliableOutbox> outboxes = new ConcurrentHashMap<>();
     /**
@@ -60,15 +62,16 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     private final IntegrationRuntime runtime;
 
     VelocityNetworkAuthority(ProxyServer proxy, Logger logger, ChannelIdentifier channel,
-            AuthorityChannelStore store, byte[] secret, int pendingCapacity, int receiptCapacity) {
+            AuthorityChannelStore store, byte[] secret, int pendingCapacity, int receiptCapacity) throws IOException {
         this.proxy = proxy;
         this.logger = logger;
         this.channel = channel;
         this.store = store;
+        this.memberships = new AuthorityMembershipStore(store.directory(), store.snapshot());
         this.pendingCapacity = pendingCapacity;
         this.receiptCapacity = receiptCapacity;
         directory.replace(store.snapshot());
-        secure = new SecureFrameCodec(2, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
+        secure = new SecureFrameCodec(3, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
         proxy.getAllServers().forEach(server -> outboxes.put(server.getServerInfo().getName(),
                 new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
         runtime = IntegrationRuntime.authority(RuntimeRole.NETWORK_AUTHORITY, directory, this::commitExternal,
@@ -77,7 +80,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     IntegrationRuntime runtime() { return runtime; }
 
-    void handle(PluginMessageEvent event) {
+    synchronized void handle(PluginMessageEvent event) {
         event.setResult(PluginMessageEvent.ForwardResult.handled());
         if (!(event.getSource() instanceof ServerConnection source)) return;
         String sourceNode = source.getServerInfo().getName();
@@ -89,21 +92,39 @@ final class VelocityNetworkAuthority implements AutoCloseable {
                 // catalog here resets live Paper membership and opens a window
                 // where an in-flight MESSAGE appears to be unauthenticated.
                 if (existing != null && existing.id().equals(frame.sessionId())
-                        && existing.epoch() == frame.epoch() && existing.catalogSynchronized()) return;
-                sessions.put(sourceNode, new Session(frame.sessionId(), frame.epoch(), false));
+                        && existing.epoch() == frame.epoch() && isCatalogSynchronized(sourceNode)) return;
+                sessions.put(sourceNode, new Session(frame.sessionId(), frame.epoch(), -1));
                 sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.READY, null,
                         sourceNode.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(10));
                 sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.STATE, null,
-                        channelStates.encode(store.snapshot()), Instant.now().plusSeconds(30));
+                        channelStates.encode(memberships.snapshot()), Instant.now().plusSeconds(30));
                 return;
             }
             requireSession(sourceNode, frame);
             if (frame.type() == FrameType.STATE) {
-                if (!store.snapshot().equals(channelStates.decode(frame.payload()))) {
+                var acknowledged = channelStates.decode(frame.payload());
+                if (acknowledged.revision() < memberships.snapshot().revision()) {
+                    sendState(sourceNode);
+                    return;
+                }
+                if (!memberships.snapshot().equals(acknowledged)) {
                     throw new FrameAuthenticationException("channel catalog acknowledgement mismatch");
                 }
                 Session session = sessions.get(sourceNode);
-                sessions.put(sourceNode, new Session(session.id(), session.epoch(), true));
+                sessions.put(sourceNode, new Session(session.id(), session.epoch(), acknowledged.revision()));
+            } else if (frame.type() == FrameType.MEMBER_CHANGE && frame.logicalMessageId() != null) {
+                // Only authenticated server connections reach this path. Paper
+                // invokes it after its existing command permissions/events.
+                var change = channelStates.decodeChange(frame.payload());
+                String result;
+                try { result = memberships.change(change); }
+                catch (IOException unavailable) {
+                    logger.error("LunaChat membership update could not be persisted; existing state retained", unavailable);
+                    result = "UNAVAILABLE";
+                }
+                sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.MEMBER_RESULT,
+                        frame.logicalMessageId(), result.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(30));
+                for (String node : sessions.keySet()) sendState(node);
             } else if (frame.type() == FrameType.MESSAGE && frame.logicalMessageId() != null) {
                 if (!isCatalogSynchronized(sourceNode)) {
                     // requireSession already authenticated this sender. The
@@ -251,7 +272,8 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         }
         outboxes.forEach((node, outbox) -> {
             Session session = sessions.get(node);
-            if (session == null || !session.catalogSynchronized()) return;
+            if (session == null) return;
+            if (!isCatalogSynchronized(node)) { sendState(node); return; }
             for (ReliableOutbox.Attempt attempt : outbox.pollDue(now, 32)) {
                 sendAttempt(node, session, attempt);
             }
@@ -288,18 +310,24 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     private boolean isCatalogSynchronized(String node) {
         Session session = sessions.get(node);
-        return session != null && session.catalogSynchronized();
+        return session != null && session.revision() == memberships.snapshot().revision();
+    }
+
+    private void sendState(String node) {
+        Session session = sessions.get(node);
+        if (session != null) sendNow(node, session.id(), session.epoch(), FrameType.STATE, null,
+                channelStates.encode(memberships.snapshot()), Instant.now().plusSeconds(30));
     }
 
     private void sendAttempt(String node, Session session, ReliableOutbox.Attempt attempt) {
-        SecureFrame frame = new SecureFrame(2, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
+        SecureFrame frame = new SecureFrame(3, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
                 attempt.logicalMessageId(), FrameType.MESSAGE, Instant.now(), attempt.expiresAt(), attempt.payload());
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }
 
     private void sendNow(String node, UUID sessionId, long epoch, FrameType type, UUID logicalId,
             byte[] payload, Instant expiresAt) {
-        SecureFrame frame = new SecureFrame(2, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
+        SecureFrame frame = new SecureFrame(3, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
                 logicalId, type, Instant.now(), expiresAt, payload);
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }

@@ -552,6 +552,12 @@ public abstract class Channel {
         }
 
         // メンバー更新
+        if (authorityReplica) {
+            var integration = com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
+            if (integration != null) integration.requestMembership(this, player, true);
+            else player.sendMessage("LunaChat membership authority is unavailable.");
+            return;
+        }
         if ( members.size() == 0 && moderator.size() == 0 ) {
             moderator.add(player);
         }
@@ -586,6 +592,12 @@ public abstract class Channel {
         }
 
         // デフォルト発言先が退出するチャンネルと一致する場合、
+        if (authorityReplica) {
+            var integration = com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
+            if (integration != null) integration.requestMembership(this, player, false);
+            else player.sendMessage("LunaChat membership authority is unavailable.");
+            return;
+        }
         // デフォルト発言先を削除する
         LunaChatAPI api = LunaChat.getAPI();
         Channel def = api.getDefaultChannel(player.getName());
@@ -1030,6 +1042,12 @@ public abstract class Channel {
         this.alias = alias;
         this.acceptsExternalMessages = acceptsExternalMessages;
         this.authorityReplica = true;
+    }
+
+    void applyAuthorityMembers(List<ChannelMember> authoritative) {
+        if (!authorityReplica) throw new IllegalStateException("not an authority replica");
+        members = new ArrayList<>(authoritative);
+        moderator.retainAll(members);
     }
 
     /** @return integration APIからの投稿を許可するか */

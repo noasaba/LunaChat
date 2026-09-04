@@ -6,7 +6,8 @@ import com.github.ucchyocean.lunachat.api.AcceptedMessage;
 import com.github.ucchyocean.lunachat.core.network.AcceptedMessageCodec;
 import com.github.ucchyocean.lunachat.core.network.FrameAuthenticationException;
 import com.github.ucchyocean.lunachat.core.network.FrameType;
-import com.github.ucchyocean.lunachat.core.network.ChannelStateCodec;
+import com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec;
+import com.github.ucchyocean.lunachat.api.ChannelId;
 import com.github.ucchyocean.lunachat.core.network.ReliableOutbox;
 import com.github.ucchyocean.lunachat.core.network.ReplayWindow;
 import com.github.ucchyocean.lunachat.core.network.ReplayFrameException;
@@ -32,14 +33,18 @@ import java.util.concurrent.CompletableFuture;
 
 /** Authenticated, bounded Paper edge. Local chat never depends on this transport. */
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
-    static final String CHANNEL = "lunachat:network_v2";
-    private static final int PROTOCOL = 2;
+    static final String CHANNEL = "lunachat:network_v3";
+    private static final int PROTOCOL = 3;
     private final LunaChatBukkit plugin;
     private final PaperIntegrationService integration;
     private volatile String nodeId = "";
     private final SecureFrameCodec secure;
     private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
-    private final ChannelStateCodec channelStates = new ChannelStateCodec();
+    private final AuthoritySnapshotCodec channelStates = new AuthoritySnapshotCodec();
+    private final Map<UUID, PendingChange> changes = new LinkedHashMap<>();
+    private record PendingChange(AuthoritySnapshotCodec.Change change, Instant expires,
+            CompletableFuture<Boolean> completion) {}
+    private AuthoritySnapshotCodec.Snapshot snapshot;
     private final ReliableOutbox outbox;
     private final int dedupCapacity;
     private record InboundPending(CompletableFuture<AcceptedMessage> completion, Instant expiresAt) {}
@@ -90,6 +95,13 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     }
 
     private void tick() {
+        // Expire even with no carrier or while authority synchronization is down.
+        var expired = new java.util.ArrayList<PendingChange>();
+        changes.values().removeIf(pending -> {
+            if (pending.expires().isAfter(Instant.now())) return false;
+            expired.add(pending); return true;
+        });
+        expired.forEach(pending -> pending.completion().complete(false));
         Player carrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
         if (carrier == null) return;
         long nowMillis = System.currentTimeMillis();
@@ -99,6 +111,15 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             return;
         }
         if (!isReady()) return;
+        var iterator = changes.entrySet().iterator();
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+            if (!entry.getValue().expires().isAfter(Instant.now())) {
+                entry.getValue().completion().complete(false); iterator.remove(); continue;
+            }
+            send(carrier, FrameType.MEMBER_CHANGE, entry.getKey(),
+                    channelStates.encodeChange(entry.getValue().change()), entry.getValue().expires());
+        }
         for (ReliableOutbox.Attempt attempt : outbox.pollDue(Instant.now(), 32)) {
             SecureFrame frame = new SecureFrame(PROTOCOL, sessionId, epoch, attempt.sequence(), attempt.frameId(),
                     attempt.logicalMessageId(), FrameType.MESSAGE, Instant.now(), attempt.expiresAt(), attempt.payload());
@@ -129,12 +150,16 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 catalogSynchronized.set(false);
                 integration.networkConnected();
             } else if (frame.type() == FrameType.STATE && ready.get()) {
-                java.util.List<com.github.ucchyocean.lunachat.api.ChannelDescriptor> catalog = channelStates.decode(frame.payload());
+                var catalog = channelStates.decode(frame.payload());
+                catalogSynchronized.set(false);
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     try {
-                        integration.applyAuthorityCatalog(catalog);
+                        if (snapshot == null || catalog.revision() >= snapshot.revision()) {
+                            integration.applyAuthoritySnapshot(catalog);
+                            snapshot = catalog;
+                        }
                         catalogSynchronized.set(true);
-                        send(player, FrameType.STATE, null, channelStates.encode(catalog), Instant.now().plusSeconds(30));
+                        send(player, FrameType.STATE, null, channelStates.encode(snapshot), Instant.now().plusSeconds(30));
                     } catch (RuntimeException rejectedCatalog) {
                         catalogSynchronized.set(false);
                         ready.set(false);
@@ -142,6 +167,10 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                         plugin.getLogger().warning("Rejected LunaChat authority catalog: " + rejectedCatalog.getMessage());
                     }
                 });
+            } else if (frame.type() == FrameType.MEMBER_RESULT && frame.logicalMessageId() != null) {
+                PendingChange pending = changes.remove(frame.logicalMessageId());
+                if (pending != null) pending.completion().complete(
+                        "APPLIED".equals(new String(frame.payload(), StandardCharsets.UTF_8)));
             } else if (frame.type() == FrameType.ACK && frame.logicalMessageId() != null) {
                 outbox.acknowledge(frame.logicalMessageId());
             } else if (frame.type() == FrameType.MESSAGE && frame.logicalMessageId() != null && isReady()) {
@@ -214,6 +243,26 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
 
     boolean isReady() { return ready.get() && catalogSynchronized.get() && !nodeId.isBlank(); }
 
+    CompletableFuture<Boolean> requestMembership(ChannelId channel, UUID player, boolean joined) {
+        if (!Bukkit.isPrimaryThread()) {
+            var completion = new CompletableFuture<Boolean>();
+            Bukkit.getScheduler().runTask(plugin, () -> requestMembership(channel, player, joined)
+                    .whenComplete((result, error) -> {
+                        if (error != null) completion.completeExceptionally(error);
+                        else completion.complete(result);
+                    }));
+            return completion;
+        }
+        if (!isReady() || snapshot == null || changes.size() >= 256) return CompletableFuture.completedFuture(false);
+        var key = new AuthoritySnapshotCodec.Key(channel, player);
+        if (changes.values().stream().anyMatch(p -> p.change().key().equals(key)))
+            return CompletableFuture.completedFuture(false);
+        var completion = new CompletableFuture<Boolean>();
+        changes.put(UUID.randomUUID(), new PendingChange(new AuthoritySnapshotCodec.Change(key, joined,
+                snapshot.version(key)), Instant.now().plusSeconds(30), completion));
+        return completion;
+    }
+
     String nodeId() {
         if (!isReady()) throw new IllegalStateException("network node identity is not assigned");
         return nodeId;
@@ -225,6 +274,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     }
 
     @Override public void close() {
+        changes.values().forEach(p -> p.completion().complete(false)); changes.clear();
         ready.set(false);
         catalogSynchronized.set(false);
         nodeId = "";

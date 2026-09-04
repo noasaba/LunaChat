@@ -32,10 +32,14 @@ public final class PaperIntegrationService {
     private final ThreadLocal<Boolean> canonicalRender = new ThreadLocal<>();
     private final IntegrationRuntime runtime;
     private final PaperNetworkEdge networkEdge;
+    private final java.util.function.Consumer<Runnable> dispatch;
+    private final java.util.logging.Logger logger;
 
     private PaperIntegrationService(LunaChatBukkit plugin, ChannelManager manager) {
         this.plugin = plugin;
         this.manager = manager;
+        dispatch = task -> Bukkit.getScheduler().runTask(plugin, task);
+        logger = plugin.getLogger();
         LunaChatConfig config = plugin.getLunaChatConfig();
         refresh();
         if ("network_edge".equals(config.getIntegrationRole())) {
@@ -49,6 +53,16 @@ public final class PaperIntegrationService {
         } else {
             throw new IllegalArgumentException("Unknown integration.role: " + config.getIntegrationRole());
         }
+    }
+
+    /** Platform seam for delivery tests; production still dispatches on Bukkit's main thread. */
+    PaperIntegrationService(ChannelManager manager, java.util.function.Consumer<Runnable> dispatch,
+            java.util.logging.Logger logger) {
+        this.plugin = null; this.manager = manager; this.dispatch = dispatch; this.logger = logger;
+        this.networkEdge = null;
+        refresh();
+        runtime = IntegrationRuntime.authority(RuntimeRole.STANDALONE_AUTHORITY, directory,
+                this::deliverExternal, Clock.systemUTC(), "delivery-test", 32, 128);
     }
 
     public static PaperIntegrationService start(LunaChatBukkit plugin, ChannelManager manager) {
@@ -77,7 +91,7 @@ public final class PaperIntegrationService {
 
     java.util.concurrent.CompletionStage<AcceptedMessage> renderAccepted(AcceptedMessage proposed) {
         CompletableFuture<AcceptedMessage> completion = new CompletableFuture<>();
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        dispatch.accept(() -> {
             Channel channel = manager.getChannels().stream()
                     .filter(candidate -> candidate.getChannelId().equals(proposed.channelId())).findFirst().orElse(null);
             if (channel == null || (proposed.origin().kind() == OriginKind.EXTERNAL
@@ -140,14 +154,14 @@ public final class PaperIntegrationService {
         if (pending != null) {
             AcceptedMessage proposed = pending.proposed();
             if (deliveredRecipients == 0) {
-                plugin.getLogger().warning("LunaChat external delivery had no local recipients: messageId="
+                logger.warning("LunaChat external delivery had no local recipients: messageId="
                         + proposed.messageId() + ", channelId=" + channel.getChannelId()
                         + ", channel=" + channel.getName() + ", recipientsBeforeEvents="
                         + recipientsBeforeEvents + ", recipientsAfterEvents=" + deliveredRecipients
                         + ", broadcast=" + channel.isBroadcastChannel()
                         + ", configuredMembers=" + channel.getMembers().size());
             } else {
-                plugin.getLogger().fine("LunaChat external delivery completed: messageId="
+                logger.fine("LunaChat external delivery completed: messageId="
                         + proposed.messageId() + ", channelId=" + channel.getChannelId()
                         + ", recipients=" + deliveredRecipients);
             }
@@ -202,12 +216,29 @@ public final class PaperIntegrationService {
         runtime.mutableStatus().update(NetworkState.READY, "AUTHORITY_CATALOG_SYNCHRONIZED");
     }
 
+    void applyAuthoritySnapshot(com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot snapshot) {
+        manager.applyAuthoritySnapshot(snapshot);
+        directory.replace(channelSnapshot());
+        runtime.mutableStatus().update(NetworkState.READY, "AUTHORITY_MEMBERSHIP_SYNCHRONIZED");
+    }
+
+    public void requestMembership(Channel channel, ChannelMember member, boolean joined) {
+        String identity = member.toString();
+        if (networkEdge == null || identity == null || !identity.startsWith("$")) {
+            member.sendMessage("LunaChat membership authority is unavailable."); return;
+        }
+        networkEdge.requestMembership(channel.getChannelId(), UUID.fromString(identity.substring(1)), joined)
+                .thenAccept(applied -> member.sendMessage(applied
+                        ? "LunaChat membership updated: " + channel.getName()
+                        : "LunaChat membership change was not applied; authority unavailable, restricted, or changed. Retry after synchronization."));
+    }
+
     void networkUnavailable(String diagnostic) {
         runtime.mutableStatus().update(NetworkState.UNAVAILABLE, diagnostic);
     }
 
     public void stop() {
-        Bukkit.getServicesManager().unregister(LunaChatIntegrationApi.class, runtime);
+        if (plugin != null) Bukkit.getServicesManager().unregister(LunaChatIntegrationApi.class, runtime);
         if (networkEdge != null) networkEdge.close();
         runtime.close();
         if (current == this) current = null;

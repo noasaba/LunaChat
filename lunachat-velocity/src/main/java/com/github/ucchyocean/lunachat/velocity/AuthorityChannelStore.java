@@ -34,6 +34,8 @@ final class AuthorityChannelStore {
         return channels.values().stream().sorted(java.util.Comparator.comparing(ChannelDescriptor::name)).toList();
     }
 
+    Path directory() { return file.getParent(); }
+
     /** Replaces the Velocity-owned catalog; Paper nodes never call this method. */
     synchronized void replace(List<ChannelDescriptor> proposal) throws IOException {
         Map<ChannelId, ChannelDescriptor> replacement = new LinkedHashMap<>();

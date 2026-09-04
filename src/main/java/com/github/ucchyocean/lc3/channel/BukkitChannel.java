@@ -164,7 +164,8 @@ public class BukkitChannel extends Channel {
         }
 
         // 通常ブロードキャストなら、設定に応じてdynmapへ送信する
-        DynmapBridge dynmap = LunaChatBukkit.getInstance().getDynmap();
+        LunaChatBukkit plugin = LunaChatBukkit.getInstance();
+        DynmapBridge dynmap = plugin == null ? null : plugin.getDynmap();
         if ( config.isSendBroadcastChannelChatToDynmap() &&
                 sendDynmap &&
                 dynmap != null &&

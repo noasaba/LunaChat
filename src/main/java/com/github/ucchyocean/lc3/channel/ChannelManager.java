@@ -525,6 +525,18 @@ public class ChannelManager implements LunaChatAPI {
         channels = replacement;
     }
 
+    public synchronized void applyAuthoritySnapshot(
+            com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot snapshot) {
+        applyAuthoritySnapshot(snapshot.channels());
+        for (Channel channel : channels.values()) {
+            List<ChannelMember> members = snapshot.members().stream()
+                    .filter(m -> m.joined() && m.key().channel().equals(channel.getChannelId()))
+                    .map(m -> (ChannelMember) new com.github.ucchyocean.lc3.member.ChannelMemberPlayer(m.key().player()))
+                    .toList();
+            channel.applyAuthorityMembers(members);
+        }
+    }
+
     /**
      * テンプレートを取得する
      * @param id テンプレートID
