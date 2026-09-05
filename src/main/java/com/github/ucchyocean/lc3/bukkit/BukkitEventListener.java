@@ -119,12 +119,13 @@ public class BukkitEventListener implements Listener {
         LunaChat.getUUIDCacheData().put(player.getUniqueId().toString(), player.getName());
         LunaChat.getUUIDCacheData().save();
 
-        // 強制参加チャンネル設定を確認し、参加させる
-        forceJoinToForceJoinChannels(player);
-
-        // グローバルチャンネル設定がある場合
-        if ( !config.getGlobalChannel().equals("") ) {
-            tryJoinToGlobalChannel(player);
+        // Network edges defer this until the authenticated Velocity catalog
+        // arrives.  In particular, never create a Paper-local channel while
+        // the authority is unavailable or still synchronizing.
+        if (com.github.ucchyocean.lc3.integration.PaperIntegrationService.current() == null
+                || !"network_edge".equals(config.getIntegrationRole())) {
+            forceJoinToForceJoinChannels(player);
+            if ( !config.getGlobalChannel().equals("") ) tryJoinToGlobalChannel(player);
         }
 
         // チャンネルチャット情報を表示する

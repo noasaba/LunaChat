@@ -1,7 +1,40 @@
-# Authority membership (4.0.10-SNAPSHOT / wire 3)
+# Authority membership (4.0.10-SNAPSHOT / wire 4)
 
 Status: implementation and automated-test candidate. Live two-Paper/Discord
 verification remains required before deployment.
+
+## First Velocity bootstrap
+
+An empty Velocity authority is intentional: it never invents a channel from a
+Paper configuration. From the Velocity console, after `LunaChat authority
+ready`, create the canonical channel and settings before bringing Paper edges
+online:
+
+```text
+/lunachat create global true
+/lunachat default global
+/lunachat force global
+/lunachat list
+```
+
+`create <name> [acceptsExternalMessages]`, `list`, `delete <name>`,
+`alias <name> <alias|->`, `default <name|->`, and `force <name,...|->` are
+Velocity-console authority commands. A referenced default/force channel cannot
+be deleted. They write `channels.properties` atomically and retain stable UUIDs.
+This supplies the canonical `global` that `lunabridge setup <discord-id> global`
+resolves through the shared Integration API.
+
+Paper network edges ignore their local `globalChannel` and `forceJoinChannels`.
+They wait for the authenticated catalog STATE, then apply Velocity defaults to
+already-online and subsequently connected players. Before that point they do
+not create a local channel or issue an authority-unavailable error merely
+because the carrier/player handshake has not completed.
+
+Diagnostics are distinct: no Velocity transport is `AUTHORITY_UNAVAILABLE`,
+an invalid authenticated frame is `AUTHORITY_FRAME_REJECTED`, a READY session
+without STATE acknowledgement is `AWAITING_CHANNEL_CATALOG`, and a configured
+default/force name missing from the canonical catalog is rejected by Velocity
+as `unknown canonical channel` (not an unavailable authority).
 
 Velocity persists UUID membership and access policy in `membership-state.bin`
 beside its canonical `channels.properties`. Paper uses full read-only snapshots,
@@ -59,7 +92,7 @@ It refuses overwriting its output and never modifies the source. It imports one
 selected Paper only; it never unions another backend. Review the output before
 installation. Place it
 beside Velocity's `channels.properties` BEFORE the first wire-3 startup.
-Update all Paper and Velocity JARs together; wire 2 is incompatible.
+Update all Paper and Velocity JARs together; wire 4 is incompatible with wires 2 and 3.
 
 On the first start only, Velocity consumes the seed and creates the durable
 state. A present state file always takes precedence, even if corrupt (startup

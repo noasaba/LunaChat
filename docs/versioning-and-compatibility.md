@@ -4,9 +4,9 @@ The independently managed versions are:
 
 | Surface | Current | Rule |
 | --- | --- | --- |
-| Product/plugins | `4.0.10-SNAPSHOT` | SemVer; Paper/Velocity released together |
+| Product/plugins | `4.0.11-SNAPSHOT` | SemVer; Paper/Velocity released together |
 | Public Integration API | `1.0.0-SNAPSHOT` | SemVer and binary compatibility within a major |
-| LCN wire | `3` | exact match; mixed incompatible versions fail closed |
+| LCN wire | `4` | exact match; mixed incompatible versions fail closed |
 | Config schema | `1` | backup/idempotent migration; reject future schema |
 | Channel data schema | `1` | backup/idempotent migration; reject future schema |
 

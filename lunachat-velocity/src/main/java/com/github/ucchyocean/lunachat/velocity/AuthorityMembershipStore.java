@@ -16,6 +16,9 @@ final class AuthorityMembershipStore {
     private Snapshot state;
 
     AuthorityMembershipStore(Path directory, List<ChannelDescriptor> catalog) throws IOException {
+        this(directory, catalog, AuthoritySnapshotCodec.Settings.empty());
+    }
+    AuthorityMembershipStore(Path directory, List<ChannelDescriptor> catalog, AuthoritySnapshotCodec.Settings settings) throws IOException {
         Files.createDirectories(directory); file = directory.resolve("membership-state.bin");
         if (Files.exists(file)) {
             state = codec.decode(Files.readAllBytes(file));
@@ -25,7 +28,7 @@ final class AuthorityMembershipStore {
                 Set<ChannelId> ids = new HashSet<>(); catalog.forEach(c -> ids.add(c.id()));
                 if (state.channels().stream().anyMatch(c -> !ids.contains(c.id())))
                     throw new IOException("canonical channel removed or replaced: explicit membership migration required");
-                Snapshot updated = new Snapshot(state.revision() + 1, catalog, state.members(), state.joinable(), state.policies());
+                Snapshot updated = new Snapshot(state.revision() + 1, catalog, state.members(), state.joinable(), state.policies(), settings);
                 persist(updated); state = updated;
             }
         } else {
@@ -55,9 +58,13 @@ final class AuthorityMembershipStore {
                         throw new IOException("unknown import field");
                     }
                 }
-                state = new Snapshot(1, catalog, members, joinable, policies(input, catalog));
+                state = new Snapshot(1, catalog, members, joinable, policies(input, catalog), settings);
                 persist(state);
             } catch (IllegalArgumentException invalid) { throw new IOException("invalid membership import", invalid); }
+        }
+        if (!state.settings().equals(settings)) {
+            Snapshot updated = new Snapshot(state.revision() + 1, state.channels(), state.members(), state.joinable(), state.policies(), settings);
+            persist(updated); state = updated;
         }
         // This Velocity-only file is the ongoing management surface. It is
         // optional; when present it atomically replaces policy fields only,
@@ -69,12 +76,18 @@ final class AuthorityMembershipStore {
             if (!"1".equals(policyInput.getProperty("schema"))) throw new IOException("invalid policy schema");
             List<Policy> policy = policies(policyInput, catalog, true);
             if (!policy.equals(state.policies())) {
-                Snapshot updated = new Snapshot(state.revision() + 1, state.channels(), state.members(), state.joinable(), policy);
+                Snapshot updated = new Snapshot(state.revision() + 1, state.channels(), state.members(), state.joinable(), policy, state.settings());
                 persist(updated); state = updated;
             }
         }
     }
     synchronized Snapshot snapshot() { return state; }
+    synchronized void refreshCatalog(List<ChannelDescriptor> catalog, AuthoritySnapshotCodec.Settings settings) throws IOException {
+        Set<ChannelId> ids = new HashSet<>(); catalog.forEach(c -> ids.add(c.id()));
+        if (state.channels().stream().anyMatch(c -> !ids.contains(c.id()))) throw new IOException("canonical channel removed: explicit membership migration required");
+        Snapshot next = new Snapshot(state.revision() + 1, catalog, state.members(), state.joinable(), state.policies(), settings);
+        persist(next); state = next;
+    }
     synchronized String change(Change change) throws IOException {
         if (state.channels().stream().noneMatch(c -> c.id().equals(change.key().channel()))) return "UNKNOWN_CHANNEL";
         Member previous = state.members().stream().filter(m -> m.key().equals(change.key())).findFirst().orElse(null);
@@ -85,7 +98,7 @@ final class AuthorityMembershipStore {
         if (change.joined() && !state.joinable().contains(change.key().channel())) return "JOIN_DISABLED";
         List<Member> next = new ArrayList<>(state.members()); next.removeIf(m -> m.key().equals(change.key()));
         next.add(new Member(change.key(), change.joined(), state.revision() + 1));
-        Snapshot proposal = new Snapshot(state.revision() + 1, state.channels(), next, state.joinable(), state.policies());
+        Snapshot proposal = new Snapshot(state.revision() + 1, state.channels(), next, state.joinable(), state.policies(), state.settings());
         persist(proposal); state = proposal; return "APPLIED";
     }
     private static List<Policy> policies(Properties input, List<ChannelDescriptor> catalog) throws IOException {

@@ -34,6 +34,8 @@ public final class PaperIntegrationService {
     private final PaperNetworkEdge networkEdge;
     private final java.util.function.Consumer<Runnable> dispatch;
     private final java.util.logging.Logger logger;
+    private volatile com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Settings authoritySettings =
+            com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Settings.empty();
 
     private PaperIntegrationService(LunaChatBukkit plugin, ChannelManager manager) {
         this.plugin = plugin;
@@ -218,8 +220,29 @@ public final class PaperIntegrationService {
 
     void applyAuthoritySnapshot(com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot snapshot) {
         manager.applyAuthoritySnapshot(snapshot);
+        authoritySettings = snapshot.settings();
         directory.replace(channelSnapshot());
         runtime.mutableStatus().update(NetworkState.READY, "AUTHORITY_MEMBERSHIP_SYNCHRONIZED");
+        if (plugin != null) Bukkit.getOnlinePlayers().forEach(player -> dispatch.accept(() -> applyAuthorityLogin(player)));
+    }
+
+    /** Applies Velocity defaults only after the authenticated STATE snapshot exists. */
+    private void applyAuthorityLogin(Player player) {
+        if (networkEdge == null || !networkEdge.isReady()) return;
+        ChannelMember member = ChannelMember.getChannelMember(player);
+        for (String name : authoritySettings.forceJoinChannels()) {
+            Channel channel = manager.getChannel(name);
+            if (channel == null || channel.getMembers().contains(member)) continue;
+            channel.requestAuthorityMembership(member, true).thenAccept(applied -> {
+                if (applied && com.github.ucchyocean.lc3.LunaChat.getAPI().getDefaultChannel(player.getName()) == null)
+                    com.github.ucchyocean.lc3.LunaChat.getAPI().setDefaultChannel(player.getName(), channel.getName());
+            });
+        }
+        if (com.github.ucchyocean.lc3.LunaChat.getAPI().getDefaultChannel(player.getName()) == null
+                && !authoritySettings.defaultChannel().isEmpty()) {
+            Channel channel = manager.getChannel(authoritySettings.defaultChannel());
+            if (channel != null) com.github.ucchyocean.lc3.LunaChat.getAPI().setDefaultChannel(player.getName(), channel.getName());
+        }
     }
 
     public CompletableFuture<Boolean> requestMembership(Channel channel, ChannelMember member, boolean joined) {

@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /** Durable, Velocity-owned channel catalog. Paper STATE frames only acknowledge it. */
@@ -23,6 +24,8 @@ final class AuthorityChannelStore {
     private static final int SCHEMA = 1;
     private final Path file;
     private final Map<ChannelId, ChannelDescriptor> channels = new HashMap<>();
+    private String defaultChannel = "";
+    private Set<String> forceJoinChannels = Set.of();
 
     AuthorityChannelStore(Path directory) throws IOException {
         Files.createDirectories(directory);
@@ -32,6 +35,32 @@ final class AuthorityChannelStore {
 
     synchronized List<ChannelDescriptor> snapshot() {
         return channels.values().stream().sorted(java.util.Comparator.comparing(ChannelDescriptor::name)).toList();
+    }
+    synchronized com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Settings settings() {
+        return new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Settings(defaultChannel, forceJoinChannels);
+    }
+    synchronized Optional<ChannelDescriptor> find(String name) {
+        return channels.values().stream().filter(c -> c.name().equalsIgnoreCase(name) || c.aliases().stream().anyMatch(a -> a.equalsIgnoreCase(name))).findFirst();
+    }
+    synchronized ChannelDescriptor create(String name, boolean external) throws IOException {
+        if (!name.matches("[0-9A-Za-z_-]{1,20}") || find(name).isPresent()) throw new IOException("invalid or duplicate canonical channel name");
+        ChannelDescriptor created = new ChannelDescriptor(ChannelId.random(), name, Set.of(), external);
+        channels.put(created.id(), created); save(); return created;
+    }
+    synchronized void delete(String name) throws IOException {
+        ChannelDescriptor channel = find(name).orElseThrow(() -> new IOException("channel not found"));
+        if (defaultChannel.equals(channel.name()) || forceJoinChannels.contains(channel.name())) throw new IOException("channel is referenced by authority settings");
+        channels.remove(channel.id()); save();
+    }
+    synchronized void alias(String name, String alias) throws IOException {
+        ChannelDescriptor channel = find(name).orElseThrow(() -> new IOException("channel not found"));
+        if (!alias.isEmpty() && (!alias.matches("[0-9A-Za-z_-]{1,20}") || find(alias).isPresent())) throw new IOException("invalid or duplicate alias");
+        channels.put(channel.id(), new ChannelDescriptor(channel.id(), channel.name(), alias.isEmpty() ? Set.of() : Set.of(alias), channel.acceptsExternalMessages())); save();
+    }
+    synchronized void settings(String defaultChannel, Set<String> force) throws IOException {
+        if (!defaultChannel.isEmpty() && find(defaultChannel).isEmpty() || force.stream().anyMatch(name -> find(name).isEmpty()))
+            throw new IOException("settings reference an unknown canonical channel");
+        this.defaultChannel = defaultChannel; this.forceJoinChannels = Set.copyOf(force); save();
     }
 
     Path directory() { return file.getParent(); }
@@ -74,6 +103,11 @@ final class AuthorityChannelStore {
             if (channels.put(id, descriptor) != null) throw new IOException("duplicate channel id");
         }
         validateLoadedCatalog();
+        defaultChannel = properties.getProperty("defaultChannel", "");
+        String force = properties.getProperty("forceJoinChannels", "");
+        forceJoinChannels = force.isBlank() ? Set.of() : Arrays.stream(force.split(",", -1)).collect(Collectors.toUnmodifiableSet());
+        if ((!defaultChannel.isEmpty() && find(defaultChannel).isEmpty()) || forceJoinChannels.stream().anyMatch(name -> find(name).isEmpty()))
+            throw new IOException("authority settings reference unknown channel");
     }
 
     private void validateLoadedCatalog() throws IOException {
@@ -89,6 +123,8 @@ final class AuthorityChannelStore {
     private void save() throws IOException {
         Properties properties = new Properties();
         properties.setProperty("schema", Integer.toString(SCHEMA));
+        properties.setProperty("defaultChannel", defaultChannel);
+        properties.setProperty("forceJoinChannels", String.join(",", forceJoinChannels));
         for (ChannelDescriptor channel : channels.values()) {
             String prefix = "channel." + channel.id().value() + ".";
             properties.setProperty(prefix + "name", channel.name());

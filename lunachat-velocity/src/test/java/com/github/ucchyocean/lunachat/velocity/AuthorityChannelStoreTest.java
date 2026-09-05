@@ -16,6 +16,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class AuthorityChannelStoreTest {
     @TempDir Path directory;
 
+    @Test void settingsCannotReferenceMissingOrDeletedCanonicalChannel() throws Exception {
+        AuthorityChannelStore store = new AuthorityChannelStore(directory);
+        assertThrows(IOException.class, () -> store.settings("global", Set.of()));
+        store.create("global", true); store.settings("global", Set.of("global"));
+        assertThrows(IOException.class, () -> store.delete("global"));
+    }
+
     @Test void stateIsDurableAndRenameKeepsStableId() throws Exception {
         ChannelId id = ChannelId.random();
         AuthorityChannelStore first = new AuthorityChannelStore(directory);

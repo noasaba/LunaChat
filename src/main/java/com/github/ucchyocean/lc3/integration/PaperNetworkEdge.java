@@ -33,8 +33,8 @@ import java.util.concurrent.CompletableFuture;
 
 /** Authenticated, bounded Paper edge. Local chat never depends on this transport. */
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
-    static final String CHANNEL = "lunachat:network_v3";
-    private static final int PROTOCOL = 3;
+    static final String CHANNEL = "lunachat:network_v4";
+    private static final int PROTOCOL = 4;
     private final LunaChatBukkit plugin;
     private final PaperIntegrationService integration;
     private volatile String nodeId = "";

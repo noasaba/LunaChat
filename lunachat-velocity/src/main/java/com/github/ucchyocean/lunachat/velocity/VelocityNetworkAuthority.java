@@ -67,11 +67,11 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         this.logger = logger;
         this.channel = channel;
         this.store = store;
-        this.memberships = new AuthorityMembershipStore(store.directory(), store.snapshot());
+        this.memberships = new AuthorityMembershipStore(store.directory(), store.snapshot(), store.settings());
         this.pendingCapacity = pendingCapacity;
         this.receiptCapacity = receiptCapacity;
         directory.replace(store.snapshot());
-        secure = new SecureFrameCodec(3, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
+        secure = new SecureFrameCodec(4, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
         proxy.getAllServers().forEach(server -> outboxes.put(server.getServerInfo().getName(),
                 new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
         runtime = IntegrationRuntime.authority(RuntimeRole.NETWORK_AUTHORITY, directory, this::commitExternal,
@@ -79,6 +79,17 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     IntegrationRuntime runtime() { return runtime; }
+    synchronized java.util.List<com.github.ucchyocean.lunachat.api.ChannelDescriptor> channels() { return store.snapshot(); }
+    synchronized AuthoritySnapshotCodec.Settings snapshotSettings() { return store.settings(); }
+    synchronized void createChannel(String name, boolean external) throws IOException { store.create(name, external); refreshAuthority(); }
+    synchronized void deleteChannel(String name) throws IOException { store.delete(name); refreshAuthority(); }
+    synchronized void setAlias(String name, String alias) throws IOException { store.alias(name, alias); refreshAuthority(); }
+    synchronized void setSettings(String defaultChannel, java.util.Set<String> force) throws IOException { store.settings(defaultChannel, force); refreshAuthority(); }
+    private void refreshAuthority() throws IOException {
+        memberships.refreshCatalog(store.snapshot(), store.settings());
+        directory.replace(store.snapshot());
+        for (String node : sessions.keySet()) sendState(node);
+    }
 
     synchronized void handle(PluginMessageEvent event) {
         event.setResult(PluginMessageEvent.ForwardResult.handled());
@@ -320,14 +331,14 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     private void sendAttempt(String node, Session session, ReliableOutbox.Attempt attempt) {
-        SecureFrame frame = new SecureFrame(3, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
+        SecureFrame frame = new SecureFrame(4, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
                 attempt.logicalMessageId(), FrameType.MESSAGE, Instant.now(), attempt.expiresAt(), attempt.payload());
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }
 
     private void sendNow(String node, UUID sessionId, long epoch, FrameType type, UUID logicalId,
             byte[] payload, Instant expiresAt) {
-        SecureFrame frame = new SecureFrame(3, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
+        SecureFrame frame = new SecureFrame(4, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
                 logicalId, type, Instant.now(), expiresAt, payload);
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }

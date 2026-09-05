@@ -25,10 +25,18 @@ public final class AuthoritySnapshotCodec {
             return new Policy(channel, Set.of(), Set.of(), Set.of(), Map.of(), Map.of(), "", true, false);
         }
     }
+    /** Velocity-owned default and force-join policy. */
+    public record Settings(String defaultChannel, Set<String> forceJoinChannels) {
+        public Settings { defaultChannel = defaultChannel == null ? "" : defaultChannel; forceJoinChannels = Set.copyOf(forceJoinChannels); }
+        public static Settings empty() { return new Settings("", Set.of()); }
+    }
     public record Snapshot(long revision, List<ChannelDescriptor> channels, List<Member> members,
-                           Set<ChannelId> joinable, List<Policy> policies) {
+                           Set<ChannelId> joinable, List<Policy> policies, Settings settings) {
         public Snapshot(long revision, List<ChannelDescriptor> channels, List<Member> members, Set<ChannelId> joinable) {
-            this(revision, channels, members, joinable, List.of());
+            this(revision, channels, members, joinable, List.of(), Settings.empty());
+        }
+        public Snapshot(long revision, List<ChannelDescriptor> channels, List<Member> members, Set<ChannelId> joinable, List<Policy> policies) {
+            this(revision, channels, members, joinable, policies, Settings.empty());
         }
         public Snapshot {
             if (revision < 0) throw new IllegalArgumentException("invalid revision");
@@ -44,6 +52,9 @@ public final class AuthoritySnapshotCodec {
             Set<ChannelId> policyIds = new HashSet<>();
             for (Policy policy : policies) if (!ids.contains(policy.channel()) || !policyIds.add(policy.channel()))
                 throw new IllegalArgumentException("invalid channel policy");
+            Set<String> names = new HashSet<>(); for (var c : channels) { names.add(c.name()); names.addAll(c.aliases()); }
+            if (!settings.defaultChannel().isEmpty() && !names.contains(settings.defaultChannel())
+                    || !names.containsAll(settings.forceJoinChannels())) throw new IllegalArgumentException("unknown authority setting channel");
         }
         public long version(Key key) {
             return members.stream().filter(m -> m.key().equals(key)).mapToLong(Member::version).findFirst().orElse(0);
@@ -68,6 +79,8 @@ public final class AuthoritySnapshotCodec {
             for (var id : snapshot.joinable()) writeUuid(out, UUID.fromString(id.value()));
             out.writeInt(snapshot.policies().size());
             for (Policy policy : snapshot.policies()) writePolicy(out, policy);
+            out.writeUTF(snapshot.settings().defaultChannel()); out.writeInt(snapshot.settings().forceJoinChannels().size());
+            for (String name : snapshot.settings().forceJoinChannels()) out.writeUTF(name);
             if (bytes.size() > 60_000) throw new IllegalArgumentException("authority snapshot exceeds frame budget");
             return bytes.toByteArray();
         } catch (IOException impossible) { throw new UncheckedIOException(impossible); }
@@ -86,8 +99,13 @@ public final class AuthoritySnapshotCodec {
             for (int i = 0; i < count; i++) if (!joinable.add(new ChannelId(readUuid(in).toString()))) throw new IOException("duplicate policy");
             count = bounded(in.readInt()); var policies = new ArrayList<Policy>();
             for (int i = 0; i < count; i++) policies.add(readPolicy(in));
+            // v3 persisted snapshots predate authority defaults.  Keep their
+            // membership/policy state and add empty settings on upgrade.
+            if (in.available() == 0) return new Snapshot(revision, catalog, members, joinable, policies, Settings.empty());
+            String defaultChannel = in.readUTF(); count = bounded(in.readInt()); Set<String> force = new HashSet<>();
+            for (int i=0;i<count;i++) if(!force.add(in.readUTF())) throw new IOException("duplicate force channel");
             if (in.available() != 0) throw new IOException("trailing state bytes");
-            return new Snapshot(revision, catalog, members, joinable, policies);
+            return new Snapshot(revision, catalog, members, joinable, policies, new Settings(defaultChannel, force));
         } catch (IllegalArgumentException invalid) { throw new IOException("invalid authority snapshot", invalid); }
     }
     public byte[] encodeChange(Change change) {

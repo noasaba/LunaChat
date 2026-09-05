@@ -49,6 +49,22 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VelocityExternalPublishTest {
+    @Test void emptyAuthorityCanCreateGlobalAndPersistDefaultForceSettings() throws Exception {
+        Path directory = Files.createTempDirectory("lunachat-empty-authority");
+        AuthorityChannelStore store = new AuthorityChannelStore(directory);
+        ProxyServer proxy = proxy(ProxyServer.class, (method, args) -> method.getName().equals("getAllServers")
+                ? List.of() : defaultValue(method.getReturnType()));
+        try (var authority = new VelocityNetworkAuthority(proxy, LoggerFactory.getLogger("empty"), CHANNEL, store, SECRET, 32, 128)) {
+            authority.createChannel("global", true);
+            authority.setSettings("global", java.util.Set.of("global"));
+            assertEquals("global", authority.snapshotSettings().defaultChannel());
+            assertEquals(java.util.Set.of("global"), authority.snapshotSettings().forceJoinChannels());
+        }
+        AuthorityChannelStore reloaded = new AuthorityChannelStore(directory);
+        assertEquals("global", reloaded.settings().defaultChannel());
+        assertEquals("global", reloaded.snapshot().getFirst().name());
+        try (var paths = Files.walk(directory)) { paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete()); }
+    }
     @Test void membershipChangesReachBothBackendsAndReconnectCannotResurrectLeave() throws Exception {
         try (Harness harness = new Harness(2, 128, true)) {
             var codec = new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec();
@@ -119,7 +135,7 @@ class VelocityExternalPublishTest {
 
     private static final byte[] SECRET = "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
     private static final ChannelIdentifier CHANNEL = proxy(ChannelIdentifier.class,
-            (method, args) -> method.getName().equals("getId") ? "lunachat:network_v3" : defaultValue(method.getReturnType()));
+            (method, args) -> method.getName().equals("getId") ? "lunachat:network_v4" : defaultValue(method.getReturnType()));
 
     @Test void authorityAssignsIdentityFromActualVelocityConnection() throws Exception {
         try (Harness harness = new Harness(1)) {
@@ -283,9 +299,9 @@ class VelocityExternalPublishTest {
     private static final class Harness implements AutoCloseable {
         private final ChannelDescriptor channel = new ChannelDescriptor(ChannelId.random(), "global", java.util.Set.of(), true);
         private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
-        private final SecureFrameCodec inboundCodec = new SecureFrameCodec(3, SECRET,
+        private final SecureFrameCodec inboundCodec = new SecureFrameCodec(4, SECRET,
                 new ReplayWindow(128), Clock.systemUTC());
-        private final SecureFrameCodec outboundCodec = new SecureFrameCodec(3, SECRET,
+        private final SecureFrameCodec outboundCodec = new SecureFrameCodec(4, SECRET,
                 new ReplayWindow(128), Clock.systemUTC());
         private final List<SecureFrame> sent = new CopyOnWriteArrayList<>();
         private final ChannelMessageSink eventTarget = proxy(ChannelMessageSink.class,
@@ -338,7 +354,7 @@ class VelocityExternalPublishTest {
         }
 
         private void helloClaiming(String backend, String claimedIdentity) {
-            SecureFrame hello = new SecureFrame(3, session(backend), epoch, 1, UUID.randomUUID(), null,
+            SecureFrame hello = new SecureFrame(4, session(backend), epoch, 1, UUID.randomUUID(), null,
                     FrameType.HELLO, Instant.now(), Instant.now().plusSeconds(30),
                     claimedIdentity.getBytes(StandardCharsets.UTF_8));
             authority.handle(event(backend, hello));
@@ -349,7 +365,7 @@ class VelocityExternalPublishTest {
         }
 
         private void catalogAck(String backend, List<ChannelDescriptor> catalog, long sequence, long frameEpoch) {
-            SecureFrame state = new SecureFrame(3, session(backend), frameEpoch, sequence, UUID.randomUUID(), null,
+            SecureFrame state = new SecureFrame(4, session(backend), frameEpoch, sequence, UUID.randomUUID(), null,
                     FrameType.STATE, Instant.now(), Instant.now().plusSeconds(30),
                     new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec().encode(
                             new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot(
@@ -358,25 +374,25 @@ class VelocityExternalPublishTest {
         }
 
         private void reconnect(String backend) {
-            SecureFrame hello = new SecureFrame(3, session(backend), epoch + 1, 1, UUID.randomUUID(), null,
+            SecureFrame hello = new SecureFrame(4, session(backend), epoch + 1, 1, UUID.randomUUID(), null,
                     FrameType.HELLO, Instant.now(), Instant.now().plusSeconds(30), new byte[0]);
             authority.handle(event(backend, hello));
         }
 
         private void ack(String backend, AcceptedMessage message) {
-            SecureFrame ack = new SecureFrame(3, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
+            SecureFrame ack = new SecureFrame(4, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
                     FrameType.ACK, Instant.now(), Instant.now().plusSeconds(30), messages.encode(message));
             authority.handle(event(backend, ack));
         }
 
         private void message(String backend, AcceptedMessage message) {
-            SecureFrame frame = new SecureFrame(3, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
+            SecureFrame frame = new SecureFrame(4, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
                     FrameType.MESSAGE, Instant.now(), Instant.now().plusSeconds(30), messages.encode(message));
             authority.handle(event(backend, frame));
         }
 
         private void membership(String backend, byte[] payload) {
-            authority.handle(event(backend, new SecureFrame(3, session(backend), epoch, 3,
+            authority.handle(event(backend, new SecureFrame(4, session(backend), epoch, 3,
                     UUID.randomUUID(), UUID.randomUUID(), FrameType.MEMBER_CHANGE,
                     Instant.now(), Instant.now().plusSeconds(30), payload)));
         }
