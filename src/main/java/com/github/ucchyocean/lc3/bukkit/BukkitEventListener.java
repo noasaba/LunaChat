@@ -126,6 +126,8 @@ public class BukkitEventListener implements Listener {
                 || !"network_edge".equals(config.getIntegrationRole())) {
             forceJoinToForceJoinChannels(player);
             if ( !config.getGlobalChannel().equals("") ) tryJoinToGlobalChannel(player);
+        } else {
+            com.github.ucchyocean.lc3.integration.PaperIntegrationService.current().applyAuthorityLogin(player);
         }
 
         // チャンネルチャット情報を表示する

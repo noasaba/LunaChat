@@ -48,6 +48,9 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
     private final AuthoritySnapshotCodec channelStates = new AuthoritySnapshotCodec();
     private final ChannelCreateCodec channelCreates = new ChannelCreateCodec();
+    private record CreateKey(String node, UUID session, UUID request) {}
+    private record CreateReceipt(ChannelCreateCodec.Request request, String result, Instant expires) {}
+    private final Map<CreateKey, CreateReceipt> createReceipts = new LinkedHashMap<>();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, ReliableOutbox> outboxes = new ConcurrentHashMap<>();
     /**
@@ -141,8 +144,16 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             } else if (frame.type() == FrameType.CHANNEL_CREATE && frame.logicalMessageId() != null) {
                 if (!isCatalogSynchronized(sourceNode)) return;
                 var request = channelCreates.decode(frame.payload());
+                createReceipts.values().removeIf(receipt -> !receipt.expires().isAfter(Instant.now()));
+                var key = new CreateKey(sourceNode, frame.sessionId(), frame.logicalMessageId());
+                var receipt = createReceipts.get(key);
                 String result;
-                if (store.find(request.name()).isPresent()) {
+                if (receipt != null) {
+                    if (!receipt.request().equals(request)) throw new FrameAuthenticationException("create request identity mismatch");
+                    result = receipt.result();
+                } else if (createReceipts.size() >= receiptCapacity) {
+                    result = "UNAVAILABLE";
+                } else if (store.find(request.name()).isPresent()) {
                     result = "EXISTS";
                 } else {
                     try {
@@ -153,6 +164,9 @@ final class VelocityNetworkAuthority implements AutoCloseable {
                         logger.error("LunaChat canonical channel could not be persisted; request rejected", unavailable);
                         result = "UNAVAILABLE";
                     }
+                }
+                if (receipt == null && !result.equals("UNAVAILABLE")) {
+                    createReceipts.put(key, new CreateReceipt(request, result, frame.expiresAt().plusSeconds(30)));
                 }
                 sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.CHANNEL_CREATE_RESULT,
                         frame.logicalMessageId(), result.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(30));

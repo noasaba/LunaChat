@@ -9,6 +9,16 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AuthorityMembershipStoreTest {
+    @Test void newlyCreatedChannelAllowsJoinWithoutReopeningExistingChannels() throws Exception {
+        var store = new AuthorityMembershipStore(directory, catalog());
+        var created = new ChannelDescriptor(ChannelId.random(), "community", Set.of(), false);
+        store.refreshCatalog(List.of(channel, created), Settings.empty());
+        assertEquals("APPLIED", store.change(new Change(new Key(created.id(), player), true, 0)));
+        assertEquals("JOIN_DISABLED", store.change(new Change(new Key(channel.id(), player), true, 0)));
+        var restarted = new AuthorityMembershipStore(directory, List.of(channel, created));
+        assertTrue(restarted.snapshot().joinable().contains(created.id()));
+        assertFalse(restarted.snapshot().joinable().contains(channel.id()));
+    }
     @TempDir Path directory;
     private final ChannelDescriptor channel = new ChannelDescriptor(ChannelId.random(), "global", Set.of(), true);
     private final UUID player = UUID.randomUUID();

@@ -103,9 +103,13 @@ public class AuthorityMembershipTest {
         var tell = manager.createPersonalChannel("sender>recipient", new ChannelMemberOther("sender"));
         assertNotNull(tell);
         assertTrue(tell.isPersonalChat());
+        var recipient = new ChannelMemberOther("recipient");
+        tell.getMembers().add(recipient);
 
-        manager.applyAuthoritySnapshot(List.of(descriptor));
+        manager.applyAuthoritySnapshot(new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot(
+                1, List.of(descriptor), List.of(), Set.of()));
         assertSame(tell, manager.getChannel("sender>recipient"));
+        assertEquals(List.of(recipient), tell.getMembers());
         assertEquals(descriptor.id(), manager.getChannel("global").getChannelId());
     }
     @Test public void authorityDefaultDefinesGlobalWithoutPaperGlobalSetting() throws Exception {

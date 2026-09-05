@@ -55,7 +55,8 @@ class VelocityExternalPublishTest {
             harness.hello("backend-b");
             harness.sent.clear();
 
-            harness.channelCreate("backend-a", "community");
+            UUID requestId = UUID.randomUUID();
+            harness.channelCreate("backend-a", "community", requestId);
 
             List<SecureFrame> states = harness.sent.stream().filter(frame -> frame.type() == FrameType.STATE).toList();
             assertEquals(2, states.size());
@@ -70,6 +71,16 @@ class VelocityExternalPublishTest {
             assertEquals("APPLIED", new String(harness.sent.stream()
                     .filter(frame -> frame.type() == FrameType.CHANNEL_CREATE_RESULT).findFirst().orElseThrow().payload(),
                     StandardCharsets.UTF_8));
+            var state = states.getFirst();
+            harness.authority.handle(harness.event("backend-a", new SecureFrame(5,
+                    harness.session("backend-a"), harness.epoch, 5, UUID.randomUUID(), null,
+                    FrameType.STATE, Instant.now(), Instant.now().plusSeconds(30), state.payload())));
+            harness.sent.clear();
+            harness.channelCreate("backend-a", "community", requestId);
+            assertEquals("APPLIED", new String(harness.sent.stream()
+                    .filter(frame -> frame.type() == FrameType.CHANNEL_CREATE_RESULT).findFirst().orElseThrow().payload(),
+                    StandardCharsets.UTF_8));
+            assertEquals(2, harness.authority.channels().size());
         }
     }
 
@@ -421,10 +432,10 @@ class VelocityExternalPublishTest {
                     Instant.now(), Instant.now().plusSeconds(30), payload)));
         }
 
-        private void channelCreate(String backend, String name) {
+        private void channelCreate(String backend, String name, UUID requestId) {
             var codec = new com.github.ucchyocean.lunachat.core.network.ChannelCreateCodec();
             authority.handle(event(backend, new SecureFrame(5, session(backend), epoch, 4,
-                    UUID.randomUUID(), UUID.randomUUID(), FrameType.CHANNEL_CREATE,
+                    UUID.randomUUID(), requestId, FrameType.CHANNEL_CREATE,
                     Instant.now(), Instant.now().plusSeconds(30),
                     codec.encode(new com.github.ucchyocean.lunachat.core.network.ChannelCreateCodec.Request(name, false)))));
         }

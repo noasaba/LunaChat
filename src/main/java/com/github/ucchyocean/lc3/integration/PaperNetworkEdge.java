@@ -302,6 +302,10 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     }
 
     CompletableFuture<PaperIntegrationService.ChannelCreationResult> requestChannelCreation(String name) {
+        try { new ChannelCreateCodec.Request(name, false); }
+        catch (IllegalArgumentException invalid) {
+            return CompletableFuture.completedFuture(PaperIntegrationService.ChannelCreationResult.REJECTED);
+        }
         if (!Bukkit.isPrimaryThread()) {
             var completion = new CompletableFuture<PaperIntegrationService.ChannelCreationResult>();
             Bukkit.getScheduler().runTask(plugin, () -> requestChannelCreation(name).whenComplete((result, error) -> {

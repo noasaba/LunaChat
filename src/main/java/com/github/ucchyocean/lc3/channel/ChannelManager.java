@@ -566,6 +566,7 @@ public class ChannelManager implements LunaChatAPI {
                             || channel.getAlias().equalsIgnoreCase(snapshot.settings().defaultChannel())));
         }
         for (Channel channel : channels.values()) {
+            if (channel.isPersonalChat()) continue;
             List<ChannelMember> members = snapshot.members().stream()
                     .filter(m -> m.joined() && m.key().channel().equals(channel.getChannelId()))
                     .map(m -> (ChannelMember) new com.github.ucchyocean.lc3.member.ChannelMemberPlayer(m.key().player()))

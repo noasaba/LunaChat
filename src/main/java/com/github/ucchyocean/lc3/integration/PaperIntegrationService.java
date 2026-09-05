@@ -152,6 +152,7 @@ public final class PaperIntegrationService {
     /** Called after filters/events and the Bukkit delivery loop have completed. */
     public void accepted(Channel channel, ChannelMember member, String finalContent,
             int recipientsBeforeEvents, int deliveredRecipients) {
+        if (channel.isPersonalChat()) return;
         if (Boolean.TRUE.equals(canonicalRender.get())) return;
         Pending pending = externalCall.get();
         if (pending != null) {
@@ -228,7 +229,7 @@ public final class PaperIntegrationService {
     }
 
     /** Applies Velocity defaults only after the authenticated STATE snapshot exists. */
-    private void applyAuthorityLogin(Player player) {
+    public void applyAuthorityLogin(Player player) {
         if (networkEdge == null || !networkEdge.isReady()) return;
         ChannelMember member = ChannelMember.getChannelMember(player);
         for (String name : authoritySettings.forceJoinChannels()) {

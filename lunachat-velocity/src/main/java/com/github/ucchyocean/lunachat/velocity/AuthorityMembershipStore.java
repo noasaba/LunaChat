@@ -85,7 +85,11 @@ final class AuthorityMembershipStore {
     synchronized void refreshCatalog(List<ChannelDescriptor> catalog, AuthoritySnapshotCodec.Settings settings) throws IOException {
         Set<ChannelId> ids = new HashSet<>(); catalog.forEach(c -> ids.add(c.id()));
         if (state.channels().stream().anyMatch(c -> !ids.contains(c.id()))) throw new IOException("canonical channel removed: explicit membership migration required");
-        Snapshot next = new Snapshot(state.revision() + 1, catalog, state.members(), state.joinable(), state.policies(), settings);
+        Set<ChannelId> joinable = new HashSet<>(state.joinable());
+        Set<ChannelId> existing = new HashSet<>(); state.channels().forEach(c -> existing.add(c.id()));
+        // New channels are open; preserve existing/imported restrictions.
+        catalog.stream().filter(c -> !existing.contains(c.id())).forEach(c -> joinable.add(c.id()));
+        Snapshot next = new Snapshot(state.revision() + 1, catalog, state.members(), joinable, state.policies(), settings);
         persist(next); state = next;
     }
     synchronized String change(Change change) throws IOException {
