@@ -560,6 +560,12 @@ public class ChannelManager implements LunaChatAPI {
             com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot snapshot) {
         applyAuthoritySnapshot(snapshot.channels());
         for (Channel channel : channels.values()) {
+            if (!channel.isPersonalChat()) channel.applyAuthorityGlobal(
+                    !snapshot.settings().defaultChannel().isEmpty()
+                            && (channel.getName().equalsIgnoreCase(snapshot.settings().defaultChannel())
+                            || channel.getAlias().equalsIgnoreCase(snapshot.settings().defaultChannel())));
+        }
+        for (Channel channel : channels.values()) {
             List<ChannelMember> members = snapshot.members().stream()
                     .filter(m -> m.joined() && m.key().channel().equals(channel.getChannelId()))
                     .map(m -> (ChannelMember) new com.github.ucchyocean.lc3.member.ChannelMemberPlayer(m.key().player()))

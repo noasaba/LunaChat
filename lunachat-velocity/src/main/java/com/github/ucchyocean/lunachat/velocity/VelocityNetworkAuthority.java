@@ -6,6 +6,7 @@ import com.github.ucchyocean.lunachat.core.IntegrationRuntime;
 import com.github.ucchyocean.lunachat.core.network.AcceptedMessageCodec;
 import com.github.ucchyocean.lunachat.core.network.ChannelStateCodec;
 import com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec;
+import com.github.ucchyocean.lunachat.core.network.ChannelCreateCodec;
 import com.github.ucchyocean.lunachat.core.network.FrameAuthenticationException;
 import com.github.ucchyocean.lunachat.core.network.FrameType;
 import com.github.ucchyocean.lunachat.core.network.ReliableOutbox;
@@ -46,6 +47,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     private final SecureFrameCodec secure;
     private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
     private final AuthoritySnapshotCodec channelStates = new AuthoritySnapshotCodec();
+    private final ChannelCreateCodec channelCreates = new ChannelCreateCodec();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, ReliableOutbox> outboxes = new ConcurrentHashMap<>();
     /**
@@ -71,7 +73,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         this.pendingCapacity = pendingCapacity;
         this.receiptCapacity = receiptCapacity;
         directory.replace(store.snapshot());
-        secure = new SecureFrameCodec(4, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
+        secure = new SecureFrameCodec(5, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
         proxy.getAllServers().forEach(server -> outboxes.put(server.getServerInfo().getName(),
                 new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
         runtime = IntegrationRuntime.authority(RuntimeRole.NETWORK_AUTHORITY, directory, this::commitExternal,
@@ -136,6 +138,24 @@ final class VelocityNetworkAuthority implements AutoCloseable {
                 sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.MEMBER_RESULT,
                         frame.logicalMessageId(), result.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(30));
                 for (String node : sessions.keySet()) sendState(node);
+            } else if (frame.type() == FrameType.CHANNEL_CREATE && frame.logicalMessageId() != null) {
+                if (!isCatalogSynchronized(sourceNode)) return;
+                var request = channelCreates.decode(frame.payload());
+                String result;
+                if (store.find(request.name()).isPresent()) {
+                    result = "EXISTS";
+                } else {
+                    try {
+                        store.create(request.name(), request.acceptsExternalMessages());
+                        refreshAuthority();
+                        result = "APPLIED";
+                    } catch (IOException unavailable) {
+                        logger.error("LunaChat canonical channel could not be persisted; request rejected", unavailable);
+                        result = "UNAVAILABLE";
+                    }
+                }
+                sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.CHANNEL_CREATE_RESULT,
+                        frame.logicalMessageId(), result.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(30));
             } else if (frame.type() == FrameType.MESSAGE && frame.logicalMessageId() != null) {
                 if (!isCatalogSynchronized(sourceNode)) {
                     // requireSession already authenticated this sender. The
@@ -331,14 +351,14 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     private void sendAttempt(String node, Session session, ReliableOutbox.Attempt attempt) {
-        SecureFrame frame = new SecureFrame(4, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
+        SecureFrame frame = new SecureFrame(5, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
                 attempt.logicalMessageId(), FrameType.MESSAGE, Instant.now(), attempt.expiresAt(), attempt.payload());
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }
 
     private void sendNow(String node, UUID sessionId, long epoch, FrameType type, UUID logicalId,
             byte[] payload, Instant expiresAt) {
-        SecureFrame frame = new SecureFrame(4, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
+        SecureFrame frame = new SecureFrame(5, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
                 logicalId, type, Instant.now(), expiresAt, payload);
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }

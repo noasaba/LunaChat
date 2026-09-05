@@ -8,6 +8,9 @@ package com.github.ucchyocean.lc3.command;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.LunaChat;
+import com.github.ucchyocean.lc3.event.EventResult;
+import com.github.ucchyocean.lc3.integration.PaperIntegrationService;
 
 /**
  * createコマンドの実行クラス
@@ -109,6 +112,29 @@ public class CreateCommand extends LunaChatSubCommand {
         if ( name.length() > config.getMaxChannelNameLength() ) {
             sender.sendMessage(Messages.errmsgCannotUseForChannelTooLong(
                     name, config.getMaxChannelNameLength()));
+            return true;
+        }
+
+        // A Paper network edge delegates definition creation to Velocity. The
+        // canonical STATE must arrive before success is reported.
+        if ("network_edge".equals(config.getIntegrationRole())) {
+            EventResult event = LunaChat.getEventSender().sendLunaChatChannelCreateEvent(name, sender);
+            if (event.isCancelled()) return true;
+            String requestedName = event.getChannelName();
+            PaperIntegrationService integration = PaperIntegrationService.current();
+            if (integration == null) {
+                sender.sendMessage("LunaChat channel authority is unavailable; no channel was created.");
+                return true;
+            }
+            integration.requestChannelCreation(requestedName).thenAccept(result -> {
+                if (result == PaperIntegrationService.ChannelCreationResult.CREATED) {
+                    sender.sendMessage(Messages.cmdmsgCreate(requestedName));
+                } else if (result == PaperIntegrationService.ChannelCreationResult.EXISTS) {
+                    sender.sendMessage(Messages.errmsgExist());
+                } else {
+                    sender.sendMessage("LunaChat channel authority rejected the request; no channel was created.");
+                }
+            });
             return true;
         }
 

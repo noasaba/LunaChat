@@ -1,4 +1,4 @@
-# Authority membership (4.0.10-SNAPSHOT / wire 4)
+# Authority membership (4.0.15-SNAPSHOT / wire 5)
 
 Status: implementation and automated-test candidate. Live two-Paper/Discord
 verification remains required before deployment.
@@ -23,6 +23,14 @@ Velocity-console authority commands. A referenced default/force channel cannot
 be deleted. They write `channels.properties` atomically and retain stable UUIDs.
 This supplies the canonical `global` that `lunabridge setup <discord-id> global`
 resolves through the shared Integration API.
+
+After bootstrap, `/lunachat create <name>` executed on any connected Paper is
+an authority request rather than a local write. Velocity allocates and persists
+the UUID, broadcasts the same definition to every Paper, and Paper reports
+success only after that canonical STATE is applied. Authority downtime or an
+invalid/duplicate request leaves every Paper unchanged. The optional Paper
+description argument is not authority state and is therefore not persisted in
+network mode.
 
 Every `/lunachat` subcommand, including `list`, requires Velocity permission
 `lunachat.admin`; the Velocity console is always allowed. Under systemd, grant
@@ -97,8 +105,8 @@ members, password/visible/world setting, moderators, bans/mutes and expiries.
 It refuses overwriting its output and never modifies the source. It imports one
 selected Paper only; it never unions another backend. Review the output before
 installation. Place it
-beside Velocity's `channels.properties` BEFORE the first wire-3 startup.
-Update all Paper and Velocity JARs together; wire 4 is incompatible with wires 2 and 3.
+beside Velocity's `channels.properties` BEFORE the first wire-5 startup.
+Update all Paper and Velocity JARs together; wire 5 is incompatible with earlier wires.
 
 On the first start only, Velocity consumes the seed and creates the durable
 state. A present state file always takes precedence, even if corrupt (startup

@@ -1,7 +1,7 @@
 # LCN2 network protocol
 
 LCN2 is an internal LunaChat protocol, independent of LunaBridge.
-Wire version 4 runs on `lunachat:network_v4` and has separate logical and secure
+Wire version 5 runs on `lunachat:network_v5` and has separate logical and secure
 frame identities.
 
 Each secure frame authenticates protocol, session UUID, startup epoch,
@@ -17,8 +17,10 @@ a Paper-supplied identity. Velocity derives the node ID from the actual
 identity for later messages. Paper repeats HELLO periodically as a
 bounded heartbeat, so a carrier reconnect or a Velocity restart converges back
 to READY. All later frames must match that session and epoch. Paper sends a
-bounded channel `STATE` proposal after READY. Velocity durably applies valid
-proposals before exposing them through its channel API.
+bounded channel `STATE` acknowledgement after READY. Velocity remains the sole
+catalog owner. A Paper `/lunachat create` is sent as `CHANNEL_CREATE`; Velocity
+persists the canonical ID, broadcasts a new `STATE`, and only then returns a
+successful result to Paper.
 
 `MESSAGE` is ACKed by logical ID. Velocity deduplicates before observer dispatch
 and cross-backend fan-out. The authority selects the canonical final content

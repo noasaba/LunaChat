@@ -4,7 +4,7 @@
 
 Standalone uses `LunaBridge-Paper -> Bukkit ServicesManager -> LunaChat-Paper`.
 Network mode uses `LunaBridge-Velocity -> LunaChatApiProvider -> LunaChat-Velocity`
-and authenticated `lunachat:network_v4` frames between Velocity and every Paper.
+and authenticated `lunachat:network_v5` frames between Velocity and every Paper.
 A Paper configured as `network_edge` deliberately lacks observe/publish
 capabilities, so a standalone bridge cannot start there.
 

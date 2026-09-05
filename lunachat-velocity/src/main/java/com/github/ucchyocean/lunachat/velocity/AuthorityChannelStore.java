@@ -45,7 +45,9 @@ final class AuthorityChannelStore {
     synchronized ChannelDescriptor create(String name, boolean external) throws IOException {
         if (!name.matches("[0-9A-Za-z_-]{1,20}") || find(name).isPresent()) throw new IOException("invalid or duplicate canonical channel name");
         ChannelDescriptor created = new ChannelDescriptor(ChannelId.random(), name, Set.of(), external);
-        channels.put(created.id(), created); save(); return created;
+        channels.put(created.id(), created);
+        try { save(); } catch (IOException failure) { channels.remove(created.id()); throw failure; }
+        return created;
     }
     synchronized void delete(String name) throws IOException {
         ChannelDescriptor channel = find(name).orElseThrow(() -> new IOException("channel not found"));

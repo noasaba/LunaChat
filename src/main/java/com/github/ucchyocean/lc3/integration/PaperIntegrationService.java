@@ -23,6 +23,7 @@ import java.util.concurrent.CompletableFuture;
 
 /** Paper discovery/lifecycle adapter around the platform-independent runtime. */
 public final class PaperIntegrationService {
+    public enum ChannelCreationResult { CREATED, EXISTS, REJECTED, UNAVAILABLE }
     private record Pending(AcceptedMessage proposed, CompletableFuture<AcceptedMessage> completion) {}
     private static volatile PaperIntegrationService current;
     private final LunaChatBukkit plugin;
@@ -251,6 +252,11 @@ public final class PaperIntegrationService {
             return CompletableFuture.completedFuture(false);
         }
         return networkEdge.requestMembership(channel.getChannelId(), UUID.fromString(identity.substring(1)), joined);
+    }
+
+    public CompletableFuture<ChannelCreationResult> requestChannelCreation(String name) {
+        if (networkEdge == null) return CompletableFuture.completedFuture(ChannelCreationResult.UNAVAILABLE);
+        return networkEdge.requestChannelCreation(name);
     }
 
     void networkUnavailable(String diagnostic) {

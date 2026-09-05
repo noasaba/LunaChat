@@ -49,6 +49,30 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VelocityExternalPublishTest {
+    @Test void paperCreatedChannelIsCanonicalAndReplicatedToEveryBackend() throws Exception {
+        try (Harness harness = new Harness(2)) {
+            harness.hello("backend-a");
+            harness.hello("backend-b");
+            harness.sent.clear();
+
+            harness.channelCreate("backend-a", "community");
+
+            List<SecureFrame> states = harness.sent.stream().filter(frame -> frame.type() == FrameType.STATE).toList();
+            assertEquals(2, states.size());
+            var codec = new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec();
+            ChannelDescriptor first = codec.decode(states.getFirst().payload()).channels().stream()
+                    .filter(channel -> channel.name().equals("community")).findFirst().orElseThrow();
+            ChannelDescriptor second = codec.decode(states.getLast().payload()).channels().stream()
+                    .filter(channel -> channel.name().equals("community")).findFirst().orElseThrow();
+            assertEquals(first.id(), second.id(), "all Paper replicas receive one Velocity-generated ID");
+            assertEquals(first.id(), harness.authority.channels().stream()
+                    .filter(channel -> channel.name().equals("community")).findFirst().orElseThrow().id());
+            assertEquals("APPLIED", new String(harness.sent.stream()
+                    .filter(frame -> frame.type() == FrameType.CHANNEL_CREATE_RESULT).findFirst().orElseThrow().payload(),
+                    StandardCharsets.UTF_8));
+        }
+    }
+
     @Test void emptyAuthorityCanCreateGlobalAndPersistDefaultForceSettings() throws Exception {
         Path directory = Files.createTempDirectory("lunachat-empty-authority");
         AuthorityChannelStore store = new AuthorityChannelStore(directory);
@@ -135,7 +159,7 @@ class VelocityExternalPublishTest {
 
     private static final byte[] SECRET = "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8);
     private static final ChannelIdentifier CHANNEL = proxy(ChannelIdentifier.class,
-            (method, args) -> method.getName().equals("getId") ? "lunachat:network_v4" : defaultValue(method.getReturnType()));
+            (method, args) -> method.getName().equals("getId") ? "lunachat:network_v5" : defaultValue(method.getReturnType()));
 
     @Test void authorityAssignsIdentityFromActualVelocityConnection() throws Exception {
         try (Harness harness = new Harness(1)) {
@@ -299,9 +323,9 @@ class VelocityExternalPublishTest {
     private static final class Harness implements AutoCloseable {
         private final ChannelDescriptor channel = new ChannelDescriptor(ChannelId.random(), "global", java.util.Set.of(), true);
         private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
-        private final SecureFrameCodec inboundCodec = new SecureFrameCodec(4, SECRET,
+        private final SecureFrameCodec inboundCodec = new SecureFrameCodec(5, SECRET,
                 new ReplayWindow(128), Clock.systemUTC());
-        private final SecureFrameCodec outboundCodec = new SecureFrameCodec(4, SECRET,
+        private final SecureFrameCodec outboundCodec = new SecureFrameCodec(5, SECRET,
                 new ReplayWindow(128), Clock.systemUTC());
         private final List<SecureFrame> sent = new CopyOnWriteArrayList<>();
         private final ChannelMessageSink eventTarget = proxy(ChannelMessageSink.class,
@@ -354,7 +378,7 @@ class VelocityExternalPublishTest {
         }
 
         private void helloClaiming(String backend, String claimedIdentity) {
-            SecureFrame hello = new SecureFrame(4, session(backend), epoch, 1, UUID.randomUUID(), null,
+            SecureFrame hello = new SecureFrame(5, session(backend), epoch, 1, UUID.randomUUID(), null,
                     FrameType.HELLO, Instant.now(), Instant.now().plusSeconds(30),
                     claimedIdentity.getBytes(StandardCharsets.UTF_8));
             authority.handle(event(backend, hello));
@@ -365,7 +389,7 @@ class VelocityExternalPublishTest {
         }
 
         private void catalogAck(String backend, List<ChannelDescriptor> catalog, long sequence, long frameEpoch) {
-            SecureFrame state = new SecureFrame(4, session(backend), frameEpoch, sequence, UUID.randomUUID(), null,
+            SecureFrame state = new SecureFrame(5, session(backend), frameEpoch, sequence, UUID.randomUUID(), null,
                     FrameType.STATE, Instant.now(), Instant.now().plusSeconds(30),
                     new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec().encode(
                             new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot(
@@ -374,27 +398,35 @@ class VelocityExternalPublishTest {
         }
 
         private void reconnect(String backend) {
-            SecureFrame hello = new SecureFrame(4, session(backend), epoch + 1, 1, UUID.randomUUID(), null,
+            SecureFrame hello = new SecureFrame(5, session(backend), epoch + 1, 1, UUID.randomUUID(), null,
                     FrameType.HELLO, Instant.now(), Instant.now().plusSeconds(30), new byte[0]);
             authority.handle(event(backend, hello));
         }
 
         private void ack(String backend, AcceptedMessage message) {
-            SecureFrame ack = new SecureFrame(4, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
+            SecureFrame ack = new SecureFrame(5, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
                     FrameType.ACK, Instant.now(), Instant.now().plusSeconds(30), messages.encode(message));
             authority.handle(event(backend, ack));
         }
 
         private void message(String backend, AcceptedMessage message) {
-            SecureFrame frame = new SecureFrame(4, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
+            SecureFrame frame = new SecureFrame(5, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
                     FrameType.MESSAGE, Instant.now(), Instant.now().plusSeconds(30), messages.encode(message));
             authority.handle(event(backend, frame));
         }
 
         private void membership(String backend, byte[] payload) {
-            authority.handle(event(backend, new SecureFrame(4, session(backend), epoch, 3,
+            authority.handle(event(backend, new SecureFrame(5, session(backend), epoch, 3,
                     UUID.randomUUID(), UUID.randomUUID(), FrameType.MEMBER_CHANGE,
                     Instant.now(), Instant.now().plusSeconds(30), payload)));
+        }
+
+        private void channelCreate(String backend, String name) {
+            var codec = new com.github.ucchyocean.lunachat.core.network.ChannelCreateCodec();
+            authority.handle(event(backend, new SecureFrame(5, session(backend), epoch, 4,
+                    UUID.randomUUID(), UUID.randomUUID(), FrameType.CHANNEL_CREATE,
+                    Instant.now(), Instant.now().plusSeconds(30),
+                    codec.encode(new com.github.ucchyocean.lunachat.core.network.ChannelCreateCodec.Request(name, false)))));
         }
 
         private AcceptedMessage minecraftMessage(String backend, String content) {

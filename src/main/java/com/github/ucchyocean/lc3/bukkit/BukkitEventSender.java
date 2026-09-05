@@ -76,20 +76,6 @@ public class BukkitEventSender implements EventSenderInterface {
         legacy.setCancelled(event.isCancelled());
         Bukkit.getPluginManager().callEvent(legacy);
 
-        if (event.isCancelled() || legacy.isCancelled()) {
-            LunaChatBukkit.getInstance().getLogger().warning("Channel creation cancelled: name=" + channelName
-                    + ", bukkitEventCancelled=" + event.isCancelled()
-                    + ", legacyEventCancelled=" + legacy.isCancelled());
-            for (var listener : LunaChatBukkitChannelCreateEvent.getHandlerList().getRegisteredListeners()) {
-                LunaChatBukkit.getInstance().getLogger().warning("ChannelCreate listener: "
-                        + listener.getPlugin().getName() + " priority=" + listener.getPriority());
-            }
-            for (var listener : LunaChatChannelCreateEvent.getHandlerList().getRegisteredListeners()) {
-                LunaChatBukkit.getInstance().getLogger().warning("LegacyChannelCreate listener: "
-                        + listener.getPlugin().getName() + " priority=" + listener.getPriority());
-            }
-        }
-
         EventResult result = new EventResult();
         result.setCancelled(legacy.isCancelled());
         result.setNgMaskedMessage(legacy.getNgMaskedMessage());
@@ -115,6 +101,20 @@ public class BukkitEventSender implements EventSenderInterface {
                 event.getChannelName(), convertChannelMemberToCommandSender(member));
         legacy.setCancelled(event.isCancelled());
         Bukkit.getPluginManager().callEvent(legacy);
+
+        if (event.isCancelled() || legacy.isCancelled()) {
+            LunaChatBukkit.getInstance().getLogger().warning("Channel creation cancelled: name=" + channelName
+                    + ", bukkitEventCancelled=" + event.isCancelled()
+                    + ", legacyEventCancelled=" + legacy.isCancelled());
+            for (var listener : LunaChatBukkitChannelCreateEvent.getHandlerList().getRegisteredListeners()) {
+                LunaChatBukkit.getInstance().getLogger().warning("ChannelCreate listener: "
+                        + listener.getPlugin().getName() + " priority=" + listener.getPriority());
+            }
+            for (var listener : LunaChatChannelCreateEvent.getHandlerList().getRegisteredListeners()) {
+                LunaChatBukkit.getInstance().getLogger().warning("LegacyChannelCreate listener: "
+                        + listener.getPlugin().getName() + " priority=" + listener.getPriority());
+            }
+        }
 
         EventResult result = new EventResult();
         result.setCancelled(legacy.isCancelled());

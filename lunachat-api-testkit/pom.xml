@@ -6,7 +6,7 @@
   <parent>
     <groupId>com.github.ucchyocean</groupId>
     <artifactId>lunachat-parent</artifactId>
-    <version>4.0.14-SNAPSHOT</version>
+    <version>4.0.15-SNAPSHOT</version>
   </parent>
   <artifactId>lunachat-api-testkit</artifactId>
   <dependencies>

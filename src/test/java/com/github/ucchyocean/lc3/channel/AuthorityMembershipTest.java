@@ -108,4 +108,17 @@ public class AuthorityMembershipTest {
         assertSame(tell, manager.getChannel("sender>recipient"));
         assertEquals(descriptor.id(), manager.getChannel("global").getChannelId());
     }
+    @Test public void authorityDefaultDefinesGlobalWithoutPaperGlobalSetting() throws Exception {
+        var plugin = new LunaChatStandalone(Files.createTempDirectory("lunachat-authority-global-test").toFile());
+        plugin.onEnable();
+        var role = LunaChatConfig.class.getDeclaredField("integrationRole");
+        role.setAccessible(true); role.set(plugin.getLunaChatConfig(), "network_edge");
+        var manager = new ChannelManager();
+        var descriptor = new ChannelDescriptor(ChannelId.random(), "global", Set.of(), true);
+        manager.applyAuthoritySnapshot(new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot(
+                1, List.of(descriptor), List.of(), Set.of(), List.of(),
+                new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Settings("global", Set.of())));
+        assertEquals("", plugin.getLunaChatConfig().getGlobalChannel());
+        assertTrue(manager.getChannel("global").isGlobalChannel());
+    }
 }

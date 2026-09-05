@@ -101,6 +101,7 @@ public abstract class Channel {
 
     /** True when the definition was supplied by the Velocity authority. */
     private boolean authorityReplica;
+    private boolean authorityGlobal;
 
     /** チャンネルの別名 */
     private String alias;
@@ -214,8 +215,13 @@ public abstract class Channel {
      * @return グローバルチャンネルかどうか
      */
     public boolean isGlobalChannel() {
+        if (authorityReplica) return authorityGlobal;
         LunaChatConfig config = LunaChat.getConfig();
         return getName().equals(config.getGlobalChannel());
+    }
+
+    void applyAuthorityGlobal(boolean authorityGlobal) {
+        this.authorityGlobal = authorityGlobal;
     }
 
     /**

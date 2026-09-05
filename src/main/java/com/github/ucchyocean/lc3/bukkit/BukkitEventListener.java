@@ -282,11 +282,12 @@ public class BukkitEventListener implements Listener {
         ChannelMember player =
                 ChannelMember.getChannelMember(event.getPlayer());
 
-        if ( !config.getGlobalChannel().equals("") ) {
+        Channel authorityGlobal = api.getChannels().stream().filter(Channel::isGlobalChannel).findFirst().orElse(null);
+        if ( authorityGlobal != null || !config.getGlobalChannel().equals("") ) {
             // グローバルチャンネル設定がある場合
 
             // グローバルチャンネルの取得、無ければ作成
-            Channel global = api.getChannel(config.getGlobalChannel());
+            Channel global = authorityGlobal != null ? authorityGlobal : api.getChannel(config.getGlobalChannel());
             if ( global == null ) {
                 global = api.createChannel(config.getGlobalChannel(), player);
             }

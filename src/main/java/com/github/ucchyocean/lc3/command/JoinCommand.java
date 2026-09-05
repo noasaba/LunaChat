@@ -100,7 +100,8 @@ public class JoinCommand extends LunaChatSubCommand {
 
         // チャンネルが存在するかどうかをチェックする
         if ( channel == null ) {
-            if ( config.getGlobalChannel().equals("") &&
+            boolean hasAuthorityGlobal = api.getChannels().stream().anyMatch(Channel::isGlobalChannel);
+            if ( config.getGlobalChannel().equals("") && !hasAuthorityGlobal &&
                     channelName.equals(config.getGlobalMarker()) ) {
                 // グローバルチャンネル設定が無くて、指定チャンネルがマーカーの場合、
                 // 発言先を削除して、グローバルチャンネルにする
@@ -195,7 +196,7 @@ public class JoinCommand extends LunaChatSubCommand {
         } else {
 
             // グローバルチャンネルで、何かメッセージがあるなら、そのままチャット送信する
-            if (channel.getName().equals(config.getGlobalChannel()) &&
+            if (channel.isGlobalChannel() &&
                     message.length() > 0 && hasSpeakPermission(sender, channelName)) {
                 channel.chat(sender, message.toString());
                 return true;
@@ -219,7 +220,7 @@ public class JoinCommand extends LunaChatSubCommand {
             }
 
             // チャンネルに参加し、デフォルトの発言先に設定する
-            if ( !channel.getName().equals(config.getGlobalChannel()) ) {
+            if ( !channel.isGlobalChannel() ) {
                 if (channel.isAuthorityReplica()) {
                     final String confirmedChannelName = channelName;
                     channel.requestAuthorityMembership(sender, true).thenAccept(applied -> {

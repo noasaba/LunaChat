@@ -7,6 +7,7 @@ import com.github.ucchyocean.lunachat.core.network.AcceptedMessageCodec;
 import com.github.ucchyocean.lunachat.core.network.FrameAuthenticationException;
 import com.github.ucchyocean.lunachat.core.network.FrameType;
 import com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec;
+import com.github.ucchyocean.lunachat.core.network.ChannelCreateCodec;
 import com.github.ucchyocean.lunachat.api.ChannelId;
 import com.github.ucchyocean.lunachat.core.network.ReliableOutbox;
 import com.github.ucchyocean.lunachat.core.network.ReplayWindow;
@@ -33,17 +34,29 @@ import java.util.concurrent.CompletableFuture;
 
 /** Authenticated, bounded Paper edge. Local chat never depends on this transport. */
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
-    static final String CHANNEL = "lunachat:network_v4";
-    private static final int PROTOCOL = 4;
+    static final String CHANNEL = "lunachat:network_v5";
+    private static final int PROTOCOL = 5;
     private final LunaChatBukkit plugin;
     private final PaperIntegrationService integration;
     private volatile String nodeId = "";
     private final SecureFrameCodec secure;
     private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
     private final AuthoritySnapshotCodec channelStates = new AuthoritySnapshotCodec();
+    private final ChannelCreateCodec channelCreates = new ChannelCreateCodec();
     private final Map<UUID, PendingChange> changes = new LinkedHashMap<>();
     private record PendingChange(AuthoritySnapshotCodec.Change change, Instant expires,
             CompletableFuture<Boolean> completion) {}
+    private static final class PendingCreate {
+        private final String name;
+        private final Instant expires;
+        private final CompletableFuture<PaperIntegrationService.ChannelCreationResult> completion;
+        private boolean applied;
+        private PendingCreate(String name, Instant expires,
+                CompletableFuture<PaperIntegrationService.ChannelCreationResult> completion) {
+            this.name = name; this.expires = expires; this.completion = completion;
+        }
+    }
+    private final Map<UUID, PendingCreate> creates = new LinkedHashMap<>();
     private AuthoritySnapshotCodec.Snapshot snapshot;
     private final ReliableOutbox outbox;
     private final int dedupCapacity;
@@ -102,6 +115,11 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             expired.add(pending); return true;
         });
         expired.forEach(pending -> pending.completion().complete(false));
+        creates.values().removeIf(pending -> {
+            if (pending.expires.isAfter(Instant.now())) return false;
+            pending.completion.complete(PaperIntegrationService.ChannelCreationResult.UNAVAILABLE);
+            return true;
+        });
         Player carrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
         if (carrier == null) return;
         long nowMillis = System.currentTimeMillis();
@@ -119,6 +137,11 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             }
             send(carrier, FrameType.MEMBER_CHANGE, entry.getKey(),
                     channelStates.encodeChange(entry.getValue().change()), entry.getValue().expires());
+        }
+        for (Map.Entry<UUID, PendingCreate> entry : creates.entrySet()) {
+            PendingCreate pending = entry.getValue();
+            if (!pending.applied) send(carrier, FrameType.CHANNEL_CREATE, entry.getKey(),
+                    channelCreates.encode(new ChannelCreateCodec.Request(pending.name, false)), pending.expires);
         }
         for (ReliableOutbox.Attempt attempt : outbox.pollDue(Instant.now(), 32)) {
             SecureFrame frame = new SecureFrame(PROTOCOL, sessionId, epoch, attempt.sequence(), attempt.frameId(),
@@ -158,6 +181,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                             integration.applyAuthoritySnapshot(catalog);
                             snapshot = catalog;
                         }
+                        completeCreatedChannels();
                         catalogSynchronized.set(true);
                         send(player, FrameType.STATE, null, channelStates.encode(snapshot), Instant.now().plusSeconds(30));
                     } catch (RuntimeException rejectedCatalog) {
@@ -171,6 +195,20 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 PendingChange pending = changes.remove(frame.logicalMessageId());
                 if (pending != null) pending.completion().complete(
                         "APPLIED".equals(new String(frame.payload(), StandardCharsets.UTF_8)));
+            } else if (frame.type() == FrameType.CHANNEL_CREATE_RESULT && frame.logicalMessageId() != null) {
+                PendingCreate pending = creates.get(frame.logicalMessageId());
+                if (pending != null) {
+                    String result = new String(frame.payload(), StandardCharsets.UTF_8);
+                    if ("APPLIED".equals(result)) {
+                        pending.applied = true;
+                        completeCreatedChannels();
+                    } else {
+                        creates.remove(frame.logicalMessageId());
+                        pending.completion.complete("EXISTS".equals(result)
+                                ? PaperIntegrationService.ChannelCreationResult.EXISTS
+                                : PaperIntegrationService.ChannelCreationResult.REJECTED);
+                    }
+                }
             } else if (frame.type() == FrameType.ACK && frame.logicalMessageId() != null) {
                 outbox.acknowledge(frame.logicalMessageId());
             } else if (frame.type() == FrameType.MESSAGE && frame.logicalMessageId() != null && isReady()) {
@@ -263,6 +301,37 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
         return completion;
     }
 
+    CompletableFuture<PaperIntegrationService.ChannelCreationResult> requestChannelCreation(String name) {
+        if (!Bukkit.isPrimaryThread()) {
+            var completion = new CompletableFuture<PaperIntegrationService.ChannelCreationResult>();
+            Bukkit.getScheduler().runTask(plugin, () -> requestChannelCreation(name).whenComplete((result, error) -> {
+                if (error != null) completion.completeExceptionally(error); else completion.complete(result);
+            }));
+            return completion;
+        }
+        if (!isReady() || snapshot == null || creates.size() >= 64) {
+            return CompletableFuture.completedFuture(PaperIntegrationService.ChannelCreationResult.UNAVAILABLE);
+        }
+        if (creates.values().stream().anyMatch(pending -> pending.name.equalsIgnoreCase(name))) {
+            return CompletableFuture.completedFuture(PaperIntegrationService.ChannelCreationResult.REJECTED);
+        }
+        var completion = new CompletableFuture<PaperIntegrationService.ChannelCreationResult>();
+        creates.put(UUID.randomUUID(), new PendingCreate(name, Instant.now().plusSeconds(30), completion));
+        return completion;
+    }
+
+    private void completeCreatedChannels() {
+        var iterator = creates.entrySet().iterator();
+        while (iterator.hasNext()) {
+            PendingCreate pending = iterator.next().getValue();
+            if (pending.applied && snapshot != null && snapshot.channels().stream()
+                    .anyMatch(channel -> channel.name().equalsIgnoreCase(pending.name))) {
+                iterator.remove();
+                pending.completion.complete(PaperIntegrationService.ChannelCreationResult.CREATED);
+            }
+        }
+    }
+
     String nodeId() {
         if (!isReady()) throw new IllegalStateException("network node identity is not assigned");
         return nodeId;
@@ -275,6 +344,8 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
 
     @Override public void close() {
         changes.values().forEach(p -> p.completion().complete(false)); changes.clear();
+        creates.values().forEach(p -> p.completion.complete(PaperIntegrationService.ChannelCreationResult.UNAVAILABLE));
+        creates.clear();
         ready.set(false);
         catalogSynchronized.set(false);
         nodeId = "";
