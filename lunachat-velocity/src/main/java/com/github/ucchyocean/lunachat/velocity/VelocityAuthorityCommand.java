@@ -1,15 +1,23 @@
 package com.github.ucchyocean.lunachat.velocity;
 
 import com.velocitypowered.api.command.SimpleCommand;
+import com.velocitypowered.api.command.CommandSource;
+import com.velocitypowered.api.proxy.ConsoleCommandSource;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 
 /** Console-safe Velocity authority administration; Paper never owns catalog state. */
 final class VelocityAuthorityCommand implements SimpleCommand {
+    static final String ADMIN_PERMISSION = "lunachat.admin";
     private final VelocityNetworkAuthority authority;
     VelocityAuthorityCommand(VelocityNetworkAuthority authority) { this.authority = authority; }
+    @Override public boolean hasPermission(Invocation invocation) { return allowed(invocation.source()); }
     @Override public void execute(Invocation invocation) {
         var source = invocation.source(); String[] args = invocation.arguments();
+        if (!allowed(source)) {
+            source.sendPlainMessage("You do not have permission: " + ADMIN_PERMISSION);
+            return;
+        }
         try {
             if (args.length == 0 || args[0].equalsIgnoreCase("list")) {
                 source.sendPlainMessage("LunaChat canonical channels: " + authority.channels().stream()
@@ -27,5 +35,8 @@ final class VelocityAuthorityCommand implements SimpleCommand {
     }
     private String authoritySettingsDefault() { return authority.snapshotSettings().defaultChannel(); }
     private java.util.Set<String> authoritySettingsForce() { return authority.snapshotSettings().forceJoinChannels(); }
+    private static boolean allowed(CommandSource source) {
+        return source instanceof ConsoleCommandSource || source.hasPermission(ADMIN_PERMISSION);
+    }
     private static void require(String[] args, int count) { if (args.length < count) throw new IllegalArgumentException("missing argument"); }
 }

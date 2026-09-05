@@ -24,6 +24,12 @@ be deleted. They write `channels.properties` atomically and retain stable UUIDs.
 This supplies the canonical `global` that `lunabridge setup <discord-id> global`
 resolves through the shared Integration API.
 
+Every `/lunachat` subcommand, including `list`, requires Velocity permission
+`lunachat.admin`; the Velocity console is always allowed. Under systemd, grant
+that permission through LuckPerms (or another Velocity permission provider),
+for example `lp user <player> permission set lunachat.admin true`, then run
+the command in-game. Do not depend on systemd standard input for administration.
+
 Paper network edges ignore their local `globalChannel` and `forceJoinChannels`.
 They wait for the authenticated catalog STATE, then apply Velocity defaults to
 already-online and subsequently connected players. Before that point they do
