@@ -8,6 +8,8 @@ package com.github.ucchyocean.lc3.command;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.channel.Channel;
 import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.LunaChat;
+import com.github.ucchyocean.lc3.integration.PaperIntegrationService;
 
 /**
  * joinコマンドの実行クラス
@@ -141,7 +143,40 @@ public class JoinCommand extends LunaChatSubCommand {
                     return true;
                 }
 
-                // チャンネル作成
+                // Velocity network mode delegates create-on-join to the same
+                // canonical authority path as /lunachat create.
+                if ("network_edge".equals(config.getIntegrationRole())) {
+                    final String requestedName = channelName;
+                    PaperIntegrationService integration = PaperIntegrationService.current();
+                    if (integration == null) {
+                        sender.sendMessage("LunaChat channel authority is unavailable; no channel was created.");
+                        return true;
+                    }
+                    integration.requestChannelCreation(requestedName).thenAccept(created -> {
+                        if (created != PaperIntegrationService.ChannelCreationResult.CREATED) {
+                            sender.sendMessage("LunaChat channel authority rejected create-on-join; no channel was created.");
+                            return;
+                        }
+                        Channel canonical = LunaChat.getAPI().getChannel(requestedName);
+                        if (canonical == null) {
+                            sender.sendMessage("LunaChat channel catalog did not converge after creation.");
+                            return;
+                        }
+                        canonical.requestAuthorityMembership(sender, true).thenAccept(joined -> {
+                            if (!joined) {
+                                sender.sendMessage("LunaChat membership change was not applied; authority unavailable or changed.");
+                                return;
+                            }
+                            LunaChat.getAPI().setDefaultChannel(sender.getName(), canonical.getName());
+                            sender.sendMessage(Messages.cmdmsgCreate(canonical.getName()));
+                            sender.sendMessage(Messages.cmdmsgJoin(canonical.getName()));
+                            sender.sendMessage(Messages.cmdmsgSet(canonical.getName()));
+                        });
+                    });
+                    return true;
+                }
+
+                // Standalone channel creation
                 Channel c = api.createChannel(channelName, sender);
                 if ( c != null ) {
                     c.addMember(sender);

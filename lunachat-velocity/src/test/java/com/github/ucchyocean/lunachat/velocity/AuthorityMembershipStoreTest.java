@@ -82,6 +82,16 @@ class AuthorityMembershipStoreTest {
                 () -> new AuthorityMembershipStore(directory, List.of(replacement, extra)));
         assertArrayEquals(durable, Files.readAllBytes(directory.resolve("membership-state.bin")));
     }
+    @Test void canonicalRemovalPrunesMembershipAndJoinPolicy() throws Exception {
+        seed(true); var store = new AuthorityMembershipStore(directory, catalog());
+        assertEquals("APPLIED", store.change(new Change(new Key(channel.id(), player), true, 0)));
+        store.refreshCatalog(List.of(), Settings.empty());
+        assertTrue(store.snapshot().channels().isEmpty());
+        assertTrue(store.snapshot().members().isEmpty());
+        assertTrue(store.snapshot().joinable().isEmpty());
+        var restarted = new AuthorityMembershipStore(directory, List.of());
+        assertTrue(restarted.snapshot().channels().isEmpty());
+    }
 
     @Test void failedPersistenceDoesNotAcknowledgeOrPublishMembership() throws Exception {
         seed(true); var store = new AuthorityMembershipStore(directory, catalog());

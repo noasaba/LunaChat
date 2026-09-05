@@ -1,7 +1,7 @@
 # LCN2 network protocol
 
 LCN2 is an internal LunaChat protocol, independent of LunaBridge.
-Wire version 5 runs on `lunachat:network_v5` and has separate logical and secure
+Wire version 6 runs on `lunachat:network_v6` and has separate logical and secure
 frame identities.
 
 Each secure frame authenticates protocol, session UUID, startup epoch,

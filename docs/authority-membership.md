@@ -1,4 +1,4 @@
-# Authority membership (4.0.15-SNAPSHOT / wire 5)
+# Authority membership (4.0.17-SNAPSHOT / wire 6)
 
 Status: implementation and automated-test candidate. Live two-Paper/Discord
 verification remains required before deployment.
@@ -12,13 +12,17 @@ online:
 
 ```text
 /lunachat create global true
+/lunachat global global
 /lunachat default global
 /lunachat force global
 /lunachat list
 ```
 
-`create <name> [acceptsExternalMessages]`, `list`, `delete <name>`,
-`alias <name> <alias|->`, `default <name|->`, and `force <name,...|->` are
+`create <name> [acceptsExternalMessages]`, `list`, `status`, `delete <name>`,
+`alias <name> <alias|->`, `external <name> <true|false>`, `global <name|->`,
+`default <name|->`, `force <name,...|->`, `joinable <name> <true|false>`,
+`password <name> <value|->`, `visible <name> <true|false>`, `world <name> <true|false>`,
+and `moderator|ban|mute <name> <uuid> <true|false> [expiryEpochMillis]` are
 Velocity-console authority commands. A referenced default/force channel cannot
 be deleted. They write `channels.properties` atomically and retain stable UUIDs.
 This supplies the canonical `global` that `lunabridge setup <discord-id> global`
@@ -106,7 +110,7 @@ It refuses overwriting its output and never modifies the source. It imports one
 selected Paper only; it never unions another backend. Review the output before
 installation. Place it
 beside Velocity's `channels.properties` BEFORE the first wire-5 startup.
-Update all Paper and Velocity JARs together; wire 5 is incompatible with earlier wires.
+Update all Paper and Velocity JARs together; wire 6 is incompatible with earlier wires.
 
 On the first start only, Velocity consumes the seed and creates the durable
 state. A present state file always takes precedence, even if corrupt (startup

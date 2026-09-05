@@ -40,16 +40,17 @@ zeroMemberRemove: false
 # ログイン時に、参加中チャンネルを表示するかどうか
 showListOnJoin: false
 
-# /ch join コマンドで存在しないチャンネルを指定したときに、
-# チャンネルを新規作成して入室するかどうか
+# Paper単体のみ：/ch joinで存在しないチャンネルを指定したときに、
+# チャンネルを新規作成して入室するかどうか。Velocity構成では無視されます。
 createChannelOnJoinCommand: false
 
-# 通常のチャットの代わりに、既定として使用するグローバルチャンネル。
+# Paper単体のみ：通常のチャットの代わりに使用するグローバルチャンネル。
+# Velocity構成ではVelocity側のglobal/default/force設定を使用します。
 # グローバルチャンネルを作らず通常のチャットを使用する場合は、
 # から文字列 「''」 を指定すること。
 globalChannel: ''
 
-# サーバーに参加したユーザーに必ず参加させるチャンネル。
+# Paper単体のみ：サーバーに参加したユーザーに必ず参加させるチャンネル。
 # グローバルチャンネルとは別で指定できる。
 # 複数のチャンネルを設定可能。例）forceJoinChannels: ['L', 'M', 'N']
 forceJoinChannels: []

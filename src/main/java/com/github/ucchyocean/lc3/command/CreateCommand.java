@@ -118,6 +118,10 @@ public class CreateCommand extends LunaChatSubCommand {
         // A Paper network edge delegates definition creation to Velocity. The
         // canonical STATE must arrive before success is reported.
         if ("network_edge".equals(config.getIntegrationRole())) {
+            if (!desc.isEmpty()) {
+                sender.sendMessage("Channel descriptions are not authority-managed in network mode; omit the description.");
+                return true;
+            }
             EventResult event = LunaChat.getEventSender().sendLunaChatChannelCreateEvent(name, sender);
             if (event.isCancelled()) return true;
             String requestedName = event.getChannelName();

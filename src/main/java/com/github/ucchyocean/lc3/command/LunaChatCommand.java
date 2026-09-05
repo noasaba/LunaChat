@@ -44,6 +44,7 @@ public class LunaChatCommand {
         commands.add(new MuteCommand());
         commands.add(new UnmuteCommand());
         commands.add(new InfoCommand());
+        commands.add(new StatusCommand());
         commands.add(new LogCommand());
         commands.add(new CreateCommand());
         commands.add(new RemoveCommand());

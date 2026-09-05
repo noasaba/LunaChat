@@ -1,4 +1,4 @@
-# 4.0.16 debugging
+# 4.0.17 debugging
 
 Fixed: full authority STATE no longer attempts to apply replica membership to
 transient personal channels (which previously threw `not an authority replica`).
@@ -9,9 +9,9 @@ preserved. Same-session channel creation retries retain their original result in
 a bounded receipt cache. Invalid event-renamed channel names are rejected before
 entering the Paper retry queue.
 
-Validation: `mvn -o -q -pl lunachat-paper,lunachat-velocity -am clean package`.
-88 automated tests passed. Real Velocity/Paper clients and Discord were not run.
-Wire remains 5; public API, permissions and configuration schemas are unchanged.
+Validation will be recorded after the 4.0.17 package build. Real
+Velocity/Paper clients and Discord were not run. Wire 6 is intentionally
+incompatible with earlier wire versions.
 
 Remaining limitations found during inspection:
 
@@ -19,9 +19,9 @@ Remaining limitations found during inspection:
   patch. This includes channels created by earlier versions. Their intended
   access policy must be resolved explicitly rather than treating every existing
   channel as public.
-- Channel deletion still conflicts with membership-store removal protection.
-  Catalog and membership updates span two files and are not a single transaction.
-- Paper create descriptions and create-on-join are not delegated by the current
-  creation protocol. The prior release should not be interpreted as complete
-  synchronization of all channel management commands.
+- Channel deletion now treats the Velocity catalog as canonical and prunes the
+  removed channel's membership/policy state during reconciliation.
+- Paper create-on-join is delegated to the canonical authority. Descriptions
+  remain standalone-only because they are not part of the public channel wire
+  descriptor.
 - Creation receipts survive retries in the running authority, not proxy restart.

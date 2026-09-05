@@ -561,9 +561,9 @@ public class ChannelManager implements LunaChatAPI {
         applyAuthoritySnapshot(snapshot.channels());
         for (Channel channel : channels.values()) {
             if (!channel.isPersonalChat()) channel.applyAuthorityGlobal(
-                    !snapshot.settings().defaultChannel().isEmpty()
-                            && (channel.getName().equalsIgnoreCase(snapshot.settings().defaultChannel())
-                            || channel.getAlias().equalsIgnoreCase(snapshot.settings().defaultChannel())));
+                    !snapshot.settings().globalChannel().isEmpty()
+                            && (channel.getName().equalsIgnoreCase(snapshot.settings().globalChannel())
+                            || channel.getAlias().equalsIgnoreCase(snapshot.settings().globalChannel())));
         }
         for (Channel channel : channels.values()) {
             if (channel.isPersonalChat()) continue;

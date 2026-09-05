@@ -221,16 +221,23 @@ public final class PaperIntegrationService {
     }
 
     void applyAuthoritySnapshot(com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Snapshot snapshot) {
+        boolean defaultChanged = !authoritySettings.defaultChannel().equals(snapshot.settings().defaultChannel());
         manager.applyAuthoritySnapshot(snapshot);
         authoritySettings = snapshot.settings();
         directory.replace(channelSnapshot());
         runtime.mutableStatus().update(NetworkState.READY, "AUTHORITY_MEMBERSHIP_SYNCHRONIZED");
-        if (plugin != null) Bukkit.getOnlinePlayers().forEach(player -> dispatch.accept(() -> applyAuthorityLogin(player)));
+        if (plugin != null) Bukkit.getOnlinePlayers().forEach(player ->
+                dispatch.accept(() -> applyAuthorityLogin(player, defaultChanged)));
     }
 
     /** Applies Velocity defaults only after the authenticated STATE snapshot exists. */
     public void applyAuthorityLogin(Player player) {
-        if (networkEdge == null || !networkEdge.isReady()) return;
+        applyAuthorityLogin(player, false);
+    }
+
+    private void applyAuthorityLogin(Player player, boolean forceAuthorityDefault) {
+        if (networkEdge == null) return;
+        if (!networkEdge.isReady()) { networkEdge.connectNow(player); return; }
         ChannelMember member = ChannelMember.getChannelMember(player);
         for (String name : authoritySettings.forceJoinChannels()) {
             Channel channel = manager.getChannel(name);
@@ -240,7 +247,7 @@ public final class PaperIntegrationService {
                     com.github.ucchyocean.lc3.LunaChat.getAPI().setDefaultChannel(player.getName(), channel.getName());
             });
         }
-        if (com.github.ucchyocean.lc3.LunaChat.getAPI().getDefaultChannel(player.getName()) == null
+        if ((forceAuthorityDefault || com.github.ucchyocean.lc3.LunaChat.getAPI().getDefaultChannel(player.getName()) == null)
                 && !authoritySettings.defaultChannel().isEmpty()) {
             Channel channel = manager.getChannel(authoritySettings.defaultChannel());
             if (channel != null) com.github.ucchyocean.lc3.LunaChat.getAPI().setDefaultChannel(player.getName(), channel.getName());

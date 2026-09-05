@@ -24,8 +24,11 @@ final class AuthorityChannelStore {
     private static final int SCHEMA = 1;
     private final Path file;
     private final Map<ChannelId, ChannelDescriptor> channels = new HashMap<>();
+    private String globalChannel = "";
     private String defaultChannel = "";
     private Set<String> forceJoinChannels = Set.of();
+    record State(List<ChannelDescriptor> channels,
+                 com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Settings settings) {}
 
     AuthorityChannelStore(Path directory) throws IOException {
         Files.createDirectories(directory);
@@ -37,10 +40,19 @@ final class AuthorityChannelStore {
         return channels.values().stream().sorted(java.util.Comparator.comparing(ChannelDescriptor::name)).toList();
     }
     synchronized com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Settings settings() {
-        return new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Settings(defaultChannel, forceJoinChannels);
+        return new com.github.ucchyocean.lunachat.core.network.AuthoritySnapshotCodec.Settings(globalChannel, defaultChannel, forceJoinChannels);
     }
     synchronized Optional<ChannelDescriptor> find(String name) {
         return channels.values().stream().filter(c -> c.name().equalsIgnoreCase(name) || c.aliases().stream().anyMatch(a -> a.equalsIgnoreCase(name))).findFirst();
+    }
+    synchronized State state() { return new State(snapshot(), settings()); }
+    synchronized void restore(State state) throws IOException {
+        channels.clear();
+        state.channels().forEach(channel -> channels.put(channel.id(), channel));
+        globalChannel = state.settings().globalChannel();
+        defaultChannel = state.settings().defaultChannel();
+        forceJoinChannels = state.settings().forceJoinChannels();
+        save();
     }
     synchronized ChannelDescriptor create(String name, boolean external) throws IOException {
         if (!name.matches("[0-9A-Za-z_-]{1,20}") || find(name).isPresent()) throw new IOException("invalid or duplicate canonical channel name");
@@ -51,19 +63,42 @@ final class AuthorityChannelStore {
     }
     synchronized void delete(String name) throws IOException {
         ChannelDescriptor channel = find(name).orElseThrow(() -> new IOException("channel not found"));
-        if (defaultChannel.equals(channel.name()) || forceJoinChannels.contains(channel.name())) throw new IOException("channel is referenced by authority settings");
-        channels.remove(channel.id()); save();
+        if (globalChannel.equals(channel.name()) || defaultChannel.equals(channel.name()) || forceJoinChannels.contains(channel.name())) throw new IOException("channel is referenced by authority settings");
+        channels.remove(channel.id());
+        try { save(); } catch (IOException failure) { channels.put(channel.id(), channel); throw failure; }
     }
     synchronized void alias(String name, String alias) throws IOException {
         ChannelDescriptor channel = find(name).orElseThrow(() -> new IOException("channel not found"));
         if (!alias.isEmpty() && (!alias.matches("[0-9A-Za-z_-]{1,20}") || find(alias).isPresent())) throw new IOException("invalid or duplicate alias");
-        channels.put(channel.id(), new ChannelDescriptor(channel.id(), channel.name(), alias.isEmpty() ? Set.of() : Set.of(alias), channel.acceptsExternalMessages())); save();
+        channels.put(channel.id(), new ChannelDescriptor(channel.id(), channel.name(), alias.isEmpty() ? Set.of() : Set.of(alias), channel.acceptsExternalMessages()));
+        try { save(); } catch (IOException failure) { channels.put(channel.id(), channel); throw failure; }
     }
-    synchronized void settings(String defaultChannel, Set<String> force) throws IOException {
-        if (!defaultChannel.isEmpty() && find(defaultChannel).isEmpty() || force.stream().anyMatch(name -> find(name).isEmpty()))
+    synchronized void external(String name, boolean external) throws IOException {
+        ChannelDescriptor channel = find(name).orElseThrow(() -> new IOException("channel not found"));
+        ChannelDescriptor updated = new ChannelDescriptor(channel.id(), channel.name(), channel.aliases(), external);
+        channels.put(channel.id(), updated);
+        try { save(); } catch (IOException failure) { channels.put(channel.id(), channel); throw failure; }
+    }
+    synchronized void settings(String globalChannel, String defaultChannel, Set<String> force) throws IOException {
+        if (!globalChannel.isEmpty() && find(globalChannel).isEmpty()
+                || !defaultChannel.isEmpty() && find(defaultChannel).isEmpty()
+                || force.stream().anyMatch(name -> find(name).isEmpty()))
             throw new IOException("settings reference an unknown canonical channel");
-        this.defaultChannel = defaultChannel; this.forceJoinChannels = Set.copyOf(force); save();
+        String oldGlobal = this.globalChannel, oldDefault = this.defaultChannel;
+        Set<String> oldForce = this.forceJoinChannels;
+        this.globalChannel = canonicalName(globalChannel);
+        this.defaultChannel = canonicalName(defaultChannel);
+        this.forceJoinChannels = force.stream().map(this::canonicalName).collect(Collectors.toUnmodifiableSet());
+        try { save(); } catch (IOException failure) {
+            this.globalChannel = oldGlobal; this.defaultChannel = oldDefault; this.forceJoinChannels = oldForce; throw failure;
+        }
     }
+    synchronized void settings(String defaultChannel, Set<?> force) throws IOException {
+        Set<String> names = force.stream().map(String::valueOf).collect(Collectors.toSet());
+        settings(defaultChannel, defaultChannel, names);
+    }
+
+    private String canonicalName(String name) { return name.isEmpty() ? "" : find(name).orElseThrow().name(); }
 
     Path directory() { return file.getParent(); }
 
@@ -80,9 +115,9 @@ final class AuthorityChannelStore {
                 if (!lookupNames.add(alias.toLowerCase())) throw new IOException("duplicate authority channel alias");
             }
         }
-        channels.clear();
-        channels.putAll(replacement);
-        save();
+        Map<ChannelId, ChannelDescriptor> previous = new HashMap<>(channels);
+        channels.clear(); channels.putAll(replacement);
+        try { save(); } catch (IOException failure) { channels.clear(); channels.putAll(previous); throw failure; }
     }
 
     private void load() throws IOException {
@@ -106,9 +141,14 @@ final class AuthorityChannelStore {
         }
         validateLoadedCatalog();
         defaultChannel = properties.getProperty("defaultChannel", "");
+        // Schema 1 originally used defaultChannel as both login default and
+        // global/broadcast marker. Missing globalChannel migrates that meaning.
+        globalChannel = properties.getProperty("globalChannel", defaultChannel);
         String force = properties.getProperty("forceJoinChannels", "");
         forceJoinChannels = force.isBlank() ? Set.of() : Arrays.stream(force.split(",", -1)).collect(Collectors.toUnmodifiableSet());
-        if ((!defaultChannel.isEmpty() && find(defaultChannel).isEmpty()) || forceJoinChannels.stream().anyMatch(name -> find(name).isEmpty()))
+        if ((!globalChannel.isEmpty() && find(globalChannel).isEmpty())
+                || (!defaultChannel.isEmpty() && find(defaultChannel).isEmpty())
+                || forceJoinChannels.stream().anyMatch(name -> find(name).isEmpty()))
             throw new IOException("authority settings reference unknown channel");
     }
 
@@ -125,6 +165,7 @@ final class AuthorityChannelStore {
     private void save() throws IOException {
         Properties properties = new Properties();
         properties.setProperty("schema", Integer.toString(SCHEMA));
+        properties.setProperty("globalChannel", globalChannel);
         properties.setProperty("defaultChannel", defaultChannel);
         properties.setProperty("forceJoinChannels", String.join(",", forceJoinChannels));
         for (ChannelDescriptor channel : channels.values()) {

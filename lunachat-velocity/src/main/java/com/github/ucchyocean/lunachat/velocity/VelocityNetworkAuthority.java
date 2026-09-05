@@ -26,9 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ConcurrentHashMap;
@@ -76,7 +74,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         this.pendingCapacity = pendingCapacity;
         this.receiptCapacity = receiptCapacity;
         directory.replace(store.snapshot());
-        secure = new SecureFrameCodec(5, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
+        secure = new SecureFrameCodec(6, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
         proxy.getAllServers().forEach(server -> outboxes.put(server.getServerInfo().getName(),
                 new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
         runtime = IntegrationRuntime.authority(RuntimeRole.NETWORK_AUTHORITY, directory, this::commitExternal,
@@ -86,14 +84,75 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     IntegrationRuntime runtime() { return runtime; }
     synchronized java.util.List<com.github.ucchyocean.lunachat.api.ChannelDescriptor> channels() { return store.snapshot(); }
     synchronized AuthoritySnapshotCodec.Settings snapshotSettings() { return store.settings(); }
-    synchronized void createChannel(String name, boolean external) throws IOException { store.create(name, external); refreshAuthority(); }
-    synchronized void deleteChannel(String name) throws IOException { store.delete(name); refreshAuthority(); }
-    synchronized void setAlias(String name, String alias) throws IOException { store.alias(name, alias); refreshAuthority(); }
-    synchronized void setSettings(String defaultChannel, java.util.Set<String> force) throws IOException { store.settings(defaultChannel, force); refreshAuthority(); }
-    private void refreshAuthority() throws IOException {
-        memberships.refreshCatalog(store.snapshot(), store.settings());
+    @FunctionalInterface private interface StoreMutation { void run() throws IOException; }
+    private synchronized void mutateStore(StoreMutation mutation) throws IOException {
+        AuthorityChannelStore.State before = store.state();
+        try { mutation.run(); refreshAuthority(); }
+        catch (IOException failure) {
+            try { store.restore(before); } catch (IOException rollback) { failure.addSuppressed(rollback); }
+            throw failure;
+        }
+    }
+    synchronized void createChannel(String name, boolean external) throws IOException { mutateStore(() -> store.create(name, external)); }
+    synchronized void deleteChannel(String name) throws IOException { mutateStore(() -> store.delete(name)); }
+    synchronized void setAlias(String name, String alias) throws IOException { mutateStore(() -> store.alias(name, alias)); }
+    synchronized void setSettings(String globalChannel, String defaultChannel, java.util.Set<String> force) throws IOException {
+        mutateStore(() -> store.settings(globalChannel, defaultChannel, force));
+    }
+    /** Source-compatible test/migration helper: old default also denoted global. */
+    synchronized void setSettings(String defaultChannel, java.util.Set<String> force) throws IOException {
+        setSettings(defaultChannel, defaultChannel, force);
+    }
+    synchronized void setExternal(String name, boolean external) throws IOException { mutateStore(() -> store.external(name, external)); }
+    synchronized void setJoinable(String name, boolean joinable) throws IOException {
+        memberships.setJoinable(requireChannel(name).id(), joinable); publishAuthority();
+    }
+    synchronized void setPassword(String name, String password) throws IOException {
+        if (password.length() > 64) throw new IOException("password exceeds 64 characters");
+        updatePolicy(name, policy -> new AuthoritySnapshotCodec.Policy(policy.channel(), policy.moderators(), policy.banned(),
+                policy.muted(), policy.banExpires(), policy.muteExpires(), password, policy.visible(), policy.worldRange()));
+    }
+    synchronized void setVisible(String name, boolean visible) throws IOException {
+        updatePolicy(name, policy -> new AuthoritySnapshotCodec.Policy(policy.channel(), policy.moderators(), policy.banned(),
+                policy.muted(), policy.banExpires(), policy.muteExpires(), policy.password(), visible, policy.worldRange()));
+    }
+    synchronized void setWorld(String name, boolean world) throws IOException {
+        updatePolicy(name, policy -> new AuthoritySnapshotCodec.Policy(policy.channel(), policy.moderators(), policy.banned(),
+                policy.muted(), policy.banExpires(), policy.muteExpires(), policy.password(), policy.visible(), world));
+    }
+    synchronized void setPlayerPolicy(String name, String field, UUID player, boolean enabled, Long expiry) throws IOException {
+        updatePolicy(name, policy -> {
+            Set<UUID> moderators = new HashSet<>(policy.moderators());
+            Set<UUID> banned = new HashSet<>(policy.banned());
+            Set<UUID> muted = new HashSet<>(policy.muted());
+            Map<UUID, Long> banExpires = new HashMap<>(policy.banExpires());
+            Map<UUID, Long> muteExpires = new HashMap<>(policy.muteExpires());
+            Set<UUID> selected = switch (field) { case "moderator" -> moderators; case "ban" -> banned; case "mute" -> muted; default -> throw new IllegalArgumentException("unknown policy field"); };
+            if (enabled) selected.add(player); else selected.remove(player);
+            if (field.equals("ban")) { if (enabled && expiry != null) banExpires.put(player, expiry); else banExpires.remove(player); }
+            if (field.equals("mute")) { if (enabled && expiry != null) muteExpires.put(player, expiry); else muteExpires.remove(player); }
+            return new AuthoritySnapshotCodec.Policy(policy.channel(), moderators, banned, muted, banExpires, muteExpires,
+                    policy.password(), policy.visible(), policy.worldRange());
+        });
+    }
+    private void updatePolicy(String name, java.util.function.UnaryOperator<AuthoritySnapshotCodec.Policy> mutation) throws IOException {
+        memberships.setPolicy(requireChannel(name).id(), mutation); publishAuthority();
+    }
+    private com.github.ucchyocean.lunachat.api.ChannelDescriptor requireChannel(String name) throws IOException {
+        return store.find(name).orElseThrow(() -> new IOException("channel not found"));
+    }
+    private void publishAuthority() {
         directory.replace(store.snapshot());
         for (String node : sessions.keySet()) sendState(node);
+    }
+    synchronized String statusLine() {
+        long synchronizedNodes = sessions.keySet().stream().filter(this::isCatalogSynchronized).count();
+        return "LunaChat authority READY: channels=" + store.snapshot().size() + ", connectedBackends="
+                + sessions.size() + ", synchronizedBackends=" + synchronizedNodes + ", revision=" + memberships.snapshot().revision();
+    }
+    private void refreshAuthority() throws IOException {
+        memberships.refreshCatalog(store.snapshot(), store.settings());
+        publishAuthority();
     }
 
     synchronized void handle(PluginMessageEvent event) {
@@ -365,14 +424,14 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     private void sendAttempt(String node, Session session, ReliableOutbox.Attempt attempt) {
-        SecureFrame frame = new SecureFrame(5, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
+        SecureFrame frame = new SecureFrame(6, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
                 attempt.logicalMessageId(), FrameType.MESSAGE, Instant.now(), attempt.expiresAt(), attempt.payload());
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }
 
     private void sendNow(String node, UUID sessionId, long epoch, FrameType type, UUID logicalId,
             byte[] payload, Instant expiresAt) {
-        SecureFrame frame = new SecureFrame(5, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
+        SecureFrame frame = new SecureFrame(6, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
                 logicalId, type, Instant.now(), expiresAt, payload);
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }

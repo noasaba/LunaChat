@@ -114,6 +114,9 @@ permissions:
   lunachat.info:
     description: info command permission
     default: true
+  lunachat.status:
+    description: integration status command permission
+    default: true
   lunachat.log:
     description: log command permission
     default: true
@@ -164,6 +167,7 @@ permissions:
       lunachat.hide: true
       lunachat.unhide: true
       lunachat.info: true
+      lunachat.status: true
       lunachat.log: true
       lunachat.create: true
       lunachat.remove: true

@@ -40,16 +40,17 @@ zeroMemberRemove: false
 # Whether to show participating channels when logging in
 showListOnJoin: false
 
-# When someone specifies a channel that does not exist with the "/ch join" command,
-# whether to create a new channel and enter
+# Standalone Paper only: when someone specifies a channel that does not exist
+# with "/ch join", whether to create a new channel and enter. Ignored in network mode.
 createChannelOnJoinCommand: false
 
-# Global channel to use as default instead of regular chat.
+# Standalone Paper only: global channel to use as default instead of regular chat.
+# In network mode configure global/default/force on Velocity; these local values are ignored.
 # If you use regular chat without creating a global channel,
 # specify the empty string ''.
 globalChannel: ''
 
-# A channel(s) that users who join the server must join.
+# Standalone Paper only: channel(s) that users who join the server must join.
 # Can be specified separately from the global channel.
 # Multiple channels can be set. Example) forceJoinChannels: ['L','M','N']
 forceJoinChannels: []

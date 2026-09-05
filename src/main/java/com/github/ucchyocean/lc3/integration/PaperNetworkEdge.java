@@ -34,8 +34,8 @@ import java.util.concurrent.CompletableFuture;
 
 /** Authenticated, bounded Paper edge. Local chat never depends on this transport. */
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
-    static final String CHANNEL = "lunachat:network_v5";
-    private static final int PROTOCOL = 5;
+    static final String CHANNEL = "lunachat:network_v6";
+    private static final int PROTOCOL = 6;
     private final LunaChatBukkit plugin;
     private final PaperIntegrationService integration;
     private volatile String nodeId = "";
@@ -148,6 +148,13 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                     attempt.logicalMessageId(), FrameType.MESSAGE, Instant.now(), attempt.expiresAt(), attempt.payload());
             carrier.sendPluginMessage(plugin, CHANNEL, secure.encode(frame));
         }
+    }
+
+    /** Starts the carrier-dependent handshake immediately on player login. */
+    void connectNow(Player carrier) {
+        if (carrier == null || isReady()) return;
+        send(carrier, FrameType.HELLO, null, new byte[0], Instant.now().plusSeconds(10));
+        lastHelloMillis = System.currentTimeMillis();
     }
 
     private void send(Player carrier, FrameType type, UUID logicalId, byte[] payload, Instant expiresAt) {

@@ -23,12 +23,8 @@ final class AuthorityMembershipStore {
         if (Files.exists(file)) {
             state = codec.decode(Files.readAllBytes(file));
             if (!state.channels().equals(catalog)) {
-                // Metadata updates and additions retain stable identities. Removing
-                // identities requires an explicit migration, never a silent reset.
-                Set<ChannelId> ids = new HashSet<>(); catalog.forEach(c -> ids.add(c.id()));
-                if (state.channels().stream().anyMatch(c -> !ids.contains(c.id())))
-                    throw new IOException("canonical channel removed or replaced: explicit membership migration required");
-                Snapshot updated = new Snapshot(state.revision() + 1, catalog, state.members(), state.joinable(), state.policies(), settings);
+                rejectIdentityReplacement(state.channels(), catalog);
+                Snapshot updated = reconciled(catalog, settings, false);
                 persist(updated); state = updated;
             }
         } else {
@@ -83,15 +79,78 @@ final class AuthorityMembershipStore {
     }
     synchronized Snapshot snapshot() { return state; }
     synchronized void refreshCatalog(List<ChannelDescriptor> catalog, AuthoritySnapshotCodec.Settings settings) throws IOException {
+        rejectIdentityReplacement(state.channels(), catalog);
+        Snapshot next = reconciled(catalog, settings, true);
+        persist(next); state = next;
+    }
+    private Snapshot reconciled(List<ChannelDescriptor> catalog, AuthoritySnapshotCodec.Settings settings, boolean openNewChannels) {
         Set<ChannelId> ids = new HashSet<>(); catalog.forEach(c -> ids.add(c.id()));
-        if (state.channels().stream().anyMatch(c -> !ids.contains(c.id()))) throw new IOException("canonical channel removed: explicit membership migration required");
         Set<ChannelId> joinable = new HashSet<>(state.joinable());
         Set<ChannelId> existing = new HashSet<>(); state.channels().forEach(c -> existing.add(c.id()));
         // New channels are open; preserve existing/imported restrictions.
-        catalog.stream().filter(c -> !existing.contains(c.id())).forEach(c -> joinable.add(c.id()));
-        Snapshot next = new Snapshot(state.revision() + 1, catalog, state.members(), joinable, state.policies(), settings);
-        persist(next); state = next;
+        if (openNewChannels) catalog.stream().filter(c -> !existing.contains(c.id())).forEach(c -> joinable.add(c.id()));
+        joinable.retainAll(ids);
+        List<Member> members = state.members().stream().filter(member -> ids.contains(member.key().channel())).toList();
+        List<Policy> policies = state.policies().stream().filter(policy -> ids.contains(policy.channel())).toList();
+        return new Snapshot(state.revision() + 1, catalog, members, joinable, policies, settings);
     }
+    private static void rejectIdentityReplacement(List<ChannelDescriptor> previous, List<ChannelDescriptor> next) throws IOException {
+        Map<String, ChannelId> nextNames = new HashMap<>();
+        next.forEach(channel -> nextNames.put(channel.name().toLowerCase(Locale.ROOT), channel.id()));
+        for (ChannelDescriptor channel : previous) {
+            ChannelId replacement = nextNames.get(channel.name().toLowerCase(Locale.ROOT));
+            if (replacement != null && !replacement.equals(channel.id()))
+                throw new IOException("canonical channel identity replaced for " + channel.name());
+        }
+    }
+    synchronized void setJoinable(ChannelId channel, boolean joinable) throws IOException {
+        requireChannel(channel);
+        Set<ChannelId> nextJoinable = new HashSet<>(state.joinable());
+        if (joinable) nextJoinable.add(channel); else nextJoinable.remove(channel);
+        replacePolicyState(state.policies(), nextJoinable);
+    }
+    synchronized void setPolicy(ChannelId channel, java.util.function.UnaryOperator<Policy> mutation) throws IOException {
+        requireChannel(channel);
+        Policy previous = state.policies().stream().filter(policy -> policy.channel().equals(channel)).findFirst()
+                .orElse(Policy.open(channel));
+        Policy updated = Objects.requireNonNull(mutation.apply(previous));
+        if (!updated.channel().equals(channel)) throw new IOException("policy changed channel identity");
+        List<Policy> policies = new ArrayList<>(state.policies());
+        policies.removeIf(policy -> policy.channel().equals(channel));
+        if (!updated.equals(Policy.open(channel))) policies.add(updated);
+        replacePolicyState(policies, state.joinable());
+    }
+    private void replacePolicyState(List<Policy> policies, Set<ChannelId> joinable) throws IOException {
+        Snapshot next = new Snapshot(state.revision() + 1, state.channels(), state.members(), joinable, policies, state.settings());
+        persistPolicyFile(next); persist(next); state = next;
+    }
+    private void requireChannel(ChannelId channel) throws IOException {
+        if (state.channels().stream().noneMatch(candidate -> candidate.id().equals(channel))) throw new IOException("channel not found");
+    }
+    private void persistPolicyFile(Snapshot snapshot) throws IOException {
+        Properties output = new Properties(); output.setProperty("schema", "1");
+        for (ChannelDescriptor channel : snapshot.channels()) {
+            Policy policy = snapshot.policies().stream().filter(value -> value.channel().equals(channel.id())).findFirst().orElse(Policy.open(channel.id()));
+            String prefix = "channel." + channel.id().value() + ".";
+            output.setProperty(prefix + "password", policy.password());
+            output.setProperty(prefix + "visible", Boolean.toString(policy.visible()));
+            output.setProperty(prefix + "world", Boolean.toString(policy.worldRange()));
+            output.setProperty(prefix + "moderators", csv(policy.moderators()));
+            output.setProperty(prefix + "banned", csv(policy.banned()));
+            output.setProperty(prefix + "muted", csv(policy.muted()));
+            output.setProperty(prefix + "ban_expires", expiries(policy.banExpires()));
+            output.setProperty(prefix + "mute_expires", expiries(policy.muteExpires()));
+        }
+        Path policy = file.resolveSibling("membership-policy.properties");
+        Path temp = Files.createTempFile(file.getParent(), "membership-policy-", ".tmp");
+        try (OutputStream stream = Files.newOutputStream(temp)) { output.store(stream, "LunaChat Velocity policy; commands keep this file complete"); }
+        try { Files.move(temp, policy, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
+        catch (AtomicMoveNotSupportedException unsupported) { Files.move(temp, policy, StandardCopyOption.REPLACE_EXISTING); }
+        finally { Files.deleteIfExists(temp); }
+    }
+    private static String csv(Set<UUID> values) { return values.stream().map(UUID::toString).sorted().collect(java.util.stream.Collectors.joining(",")); }
+    private static String expiries(Map<UUID, Long> values) { return values.entrySet().stream().sorted(Map.Entry.comparingByKey())
+            .map(entry -> entry.getKey() + "@" + entry.getValue()).collect(java.util.stream.Collectors.joining(",")); }
     synchronized String change(Change change) throws IOException {
         if (state.channels().stream().noneMatch(c -> c.id().equals(change.key().channel()))) return "UNKNOWN_CHANNEL";
         Member previous = state.members().stream().filter(m -> m.key().equals(change.key())).findFirst().orElse(null);

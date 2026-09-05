@@ -88,7 +88,7 @@ public class OptionCommand extends LunaChatSubCommand {
         // このコマンドは、デフォルトチャンネルでない人も実行できるが、その場合はチャンネル名を指定する必要がある
         ArrayList<String> optionsTemp = new ArrayList<String>();
         String cname = null;
-        if ( args.length >= 2 ) {
+        if (args.length >= 2 && args[1].contains("=")) {
             Channel def = api.getDefaultChannel(sender.getName());
             if ( def != null ) {
                 cname = def.getName();

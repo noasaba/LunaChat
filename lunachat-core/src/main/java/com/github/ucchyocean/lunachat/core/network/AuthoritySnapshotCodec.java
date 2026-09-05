@@ -25,10 +25,18 @@ public final class AuthoritySnapshotCodec {
             return new Policy(channel, Set.of(), Set.of(), Set.of(), Map.of(), Map.of(), "", true, false);
         }
     }
-    /** Velocity-owned default and force-join policy. */
-    public record Settings(String defaultChannel, Set<String> forceJoinChannels) {
-        public Settings { defaultChannel = defaultChannel == null ? "" : defaultChannel; forceJoinChannels = Set.copyOf(forceJoinChannels); }
-        public static Settings empty() { return new Settings("", Set.of()); }
+    /** Velocity-owned global, login-default and force-join policy. */
+    public record Settings(String globalChannel, String defaultChannel, Set<String> forceJoinChannels) {
+        public Settings {
+            globalChannel = globalChannel == null ? "" : globalChannel;
+            defaultChannel = defaultChannel == null ? "" : defaultChannel;
+            forceJoinChannels = Set.copyOf(forceJoinChannels);
+        }
+        /** Compatibility constructor for persisted/test settings that previously used default as global. */
+        public Settings(String defaultChannel, Set<String> forceJoinChannels) {
+            this(defaultChannel, defaultChannel, forceJoinChannels);
+        }
+        public static Settings empty() { return new Settings("", "", Set.of()); }
     }
     public record Snapshot(long revision, List<ChannelDescriptor> channels, List<Member> members,
                            Set<ChannelId> joinable, List<Policy> policies, Settings settings) {
@@ -53,7 +61,8 @@ public final class AuthoritySnapshotCodec {
             for (Policy policy : policies) if (!ids.contains(policy.channel()) || !policyIds.add(policy.channel()))
                 throw new IllegalArgumentException("invalid channel policy");
             Set<String> names = new HashSet<>(); for (var c : channels) { names.add(c.name()); names.addAll(c.aliases()); }
-            if (!settings.defaultChannel().isEmpty() && !names.contains(settings.defaultChannel())
+            if (!settings.globalChannel().isEmpty() && !names.contains(settings.globalChannel())
+                    || !settings.defaultChannel().isEmpty() && !names.contains(settings.defaultChannel())
                     || !names.containsAll(settings.forceJoinChannels())) throw new IllegalArgumentException("unknown authority setting channel");
         }
         public long version(Key key) {
@@ -81,6 +90,7 @@ public final class AuthoritySnapshotCodec {
             for (Policy policy : snapshot.policies()) writePolicy(out, policy);
             out.writeUTF(snapshot.settings().defaultChannel()); out.writeInt(snapshot.settings().forceJoinChannels().size());
             for (String name : snapshot.settings().forceJoinChannels()) out.writeUTF(name);
+            out.writeUTF(snapshot.settings().globalChannel());
             if (bytes.size() > 60_000) throw new IllegalArgumentException("authority snapshot exceeds frame budget");
             return bytes.toByteArray();
         } catch (IOException impossible) { throw new UncheckedIOException(impossible); }
@@ -104,8 +114,12 @@ public final class AuthoritySnapshotCodec {
             if (in.available() == 0) return new Snapshot(revision, catalog, members, joinable, policies, Settings.empty());
             String defaultChannel = in.readUTF(); count = bounded(in.readInt()); Set<String> force = new HashSet<>();
             for (int i=0;i<count;i++) if(!force.add(in.readUTF())) throw new IOException("duplicate force channel");
+            // Old wire-5 state ended after force channels and used default as
+            // the global marker. Preserve that meaning during the one-time migration.
+            String globalChannel = in.available() == 0 ? defaultChannel : in.readUTF();
             if (in.available() != 0) throw new IOException("trailing state bytes");
-            return new Snapshot(revision, catalog, members, joinable, policies, new Settings(defaultChannel, force));
+            return new Snapshot(revision, catalog, members, joinable, policies,
+                    new Settings(globalChannel, defaultChannel, force));
         } catch (IllegalArgumentException invalid) { throw new IOException("invalid authority snapshot", invalid); }
     }
     public byte[] encodeChange(Change change) {

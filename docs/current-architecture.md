@@ -121,7 +121,7 @@ network pass-through は plugin messaging channel `lunachat:message` を使用�
 
 現行 wire payload は `DataInputStream.writeUTF` で name、displayName、prefix、suffix、location、id、message を並べた `BukkitChatMessage` です。protocol version、session、authentication、sequence、nonce、frame ID、logical message ID、ACK、retry、replay protection、dedup はありません。送信元の正当性検証は receiver/name 比較が中心で、client-origin spoofing 対策として設計された secure frame ではありません。
 
-Bungee pass-through が無効な場合、Paper 内で LunaChat がチャットを完結します。Velocity runtime や Paper 間の authority/routing 実装は現在ありません。
+ネットワーク構成ではVelocityがchannel authorityとPaper間routingを担当し、Paperは認証済みSTATEの読み取り専用replicaとして動作します。Paper単体構成では従来どおりPaper内で完結します。
 
 ## 8. メッセージ処理と Japanize
 
@@ -191,4 +191,3 @@ reload は command から config/data を再読込します。旧 instance の A
 - `src/main/java/com/github/ucchyocean/lc3/messaging/BukkitChatMessage.java`
 - `src/main/java/com/github/ucchyocean/lc3/UUIDCacheData.java`
 - `src/main/java/com/github/ucchyocean/lc3/command/DataMaps.java`
-

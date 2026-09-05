@@ -19,6 +19,13 @@ class AuthoritySnapshotCodecTest {
         var change = new Change(key, true, 3);
         assertEquals(change, codec.decodeChange(codec.encodeChange(change)));
     }
+    @Test void roundTripKeepsGlobalAndLoginDefaultIndependent() throws Exception {
+        var global = new ChannelDescriptor(ChannelId.random(), "global", Set.of(), true);
+        var defaultChannel = new ChannelDescriptor(ChannelId.random(), "social", Set.of(), false);
+        var settings = new Settings("global", "social", Set.of("social"));
+        var state = new Snapshot(1, List.of(global, defaultChannel), List.of(), Set.of(global.id(), defaultChannel.id()), List.of(), settings);
+        assertEquals(state, new AuthoritySnapshotCodec().decode(new AuthoritySnapshotCodec().encode(state)));
+    }
     @Test void rejectsLegacyCatalogAndMalformedState() throws Exception {
         var codec = new AuthoritySnapshotCodec();
         assertThrows(java.io.IOException.class, () -> codec.decode(new ChannelStateCodec().encode(List.of())));
