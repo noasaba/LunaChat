@@ -25,7 +25,7 @@ import java.util.Base64;
 import java.util.Optional;
 import java.util.Properties;
 
-@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.17-SNAPSHOT",
+@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.18-SNAPSHOT",
         description = "LunaChat network authority for Velocity 4.1")
 public final class LunaChatVelocity implements LunaChatApiProvider {
     public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("lunachat", "network_v6");

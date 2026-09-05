@@ -214,6 +214,20 @@ public final class PaperIntegrationService {
         runtime.mutableStatus().update(NetworkState.DEGRADED, "AWAITING_CHANNEL_CATALOG");
     }
 
+    /** The transport cannot send plugin messages until Paper has a player carrier. */
+    void networkAwaitingPlayerCarrier() {
+        runtime.mutableStatus().update(NetworkState.DEGRADED, carrierDiagnostic(false));
+    }
+
+    /** A carrier exists and HELLO is being sent; authority has not replied yet. */
+    void networkConnecting() {
+        runtime.mutableStatus().update(NetworkState.DEGRADED, carrierDiagnostic(true));
+    }
+
+    static String carrierDiagnostic(boolean carrierPresent) {
+        return carrierPresent ? "AUTHORITY_CONNECTING" : "AWAITING_PLAYER_CARRIER";
+    }
+
     void applyAuthorityCatalog(List<ChannelDescriptor> catalog) {
         manager.applyAuthoritySnapshot(catalog);
         directory.replace(channelSnapshot());

@@ -48,6 +48,10 @@ disabled; the granular `lunachat-admin.*` nodes remain unchanged.
 ## Failure signals
 
 - LunaBridge/Discord down: LunaChat local and network chat are independent.
+- A Paper server with no online player cannot carry plugin messages. Its status
+  is `DEGRADED (AWAITING_PLAYER_CARRIER)`, not authority failure. After the
+  first player joins, HELLO is sent immediately and the status becomes
+  `AUTHORITY_CONNECTING`, then `READY (AUTHORITY_MEMBERSHIP_SYNCHRONIZED)`.
 - Velocity/transport down or catalog mismatch: Paper local rendering continues;
   edge network status becomes `UNAVAILABLE`; cross-backend and integration work
   is not reported as success or delivered. Legacy same-name/different-ID Paper

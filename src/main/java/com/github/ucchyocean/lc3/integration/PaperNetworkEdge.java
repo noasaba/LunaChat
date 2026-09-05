@@ -121,7 +121,10 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             return true;
         });
         Player carrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
-        if (carrier == null) return;
+        if (carrier == null) {
+            integration.networkAwaitingPlayerCarrier();
+            return;
+        }
         long nowMillis = System.currentTimeMillis();
         if (!isReady() || nowMillis - lastHelloMillis >= 10_000L) {
             send(carrier, FrameType.HELLO, null, new byte[0], Instant.now().plusSeconds(10));
@@ -153,6 +156,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     /** Starts the carrier-dependent handshake immediately on player login. */
     void connectNow(Player carrier) {
         if (carrier == null || isReady()) return;
+        integration.networkConnecting();
         send(carrier, FrameType.HELLO, null, new byte[0], Instant.now().plusSeconds(10));
         lastHelloMillis = System.currentTimeMillis();
     }

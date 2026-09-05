@@ -46,4 +46,9 @@ public class PaperIntegrationServiceTest {
         assertEquals(false, PaperIntegrationService.preservesCanonicalContent(
                 com.github.ucchyocean.lunachat.api.RuntimeRole.STANDALONE_AUTHORITY, OriginKind.EXTERNAL));
     }
+
+    @Test public void carrierDiagnosticDistinguishesNoPlayerFromAuthorityConnecting() {
+        assertEquals("AWAITING_PLAYER_CARRIER", PaperIntegrationService.carrierDiagnostic(false));
+        assertEquals("AUTHORITY_CONNECTING", PaperIntegrationService.carrierDiagnostic(true));
+    }
 }

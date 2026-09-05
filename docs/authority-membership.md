@@ -1,4 +1,4 @@
-# Authority membership (4.0.17-SNAPSHOT / wire 6)
+# Authority membership (4.0.18-SNAPSHOT / wire 6)
 
 Status: implementation and automated-test candidate. Live two-Paper/Discord
 verification remains required before deployment.
