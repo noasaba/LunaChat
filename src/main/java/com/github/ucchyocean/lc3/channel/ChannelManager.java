@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.github.ucchyocean.lc3.LunaChat;
 import com.github.ucchyocean.lc3.LunaChatAPI;
@@ -421,18 +422,43 @@ public class ChannelManager implements LunaChatAPI {
         }
         String name = result.getChannelName();
 
-        Channel channel = null;
-        if ( LunaChat.getMode() == LunaChatMode.BUKKIT ) {
-            channel = new BukkitChannel(name);
-        } else if ( LunaChat.getMode() == LunaChatMode.BUNGEE ) {
-            channel = new BungeeChannel(name);
-        } else {
-            channel = new StandaloneChannel(name);
-        }
+        Channel channel = newChannel(name);
 
         channels.put(name.toLowerCase(), channel);
         channel.save();
         return channel;
+    }
+
+    /**
+     * Creates LunaChat's transient 1:1 channel. Personal channels are runtime
+     * delivery state, not canonical channel definitions, so a network edge may
+     * create them locally without allocating or persisting an authority ID.
+     */
+    public Channel createPersonalChannel(String channelName, ChannelMember member) {
+        if (channelName == null || !channelName.contains(">")) {
+            throw new IllegalArgumentException("personal channel name must contain >");
+        }
+        Channel existing = getChannel(channelName);
+        if (existing != null) return existing;
+
+        String name = channelName;
+        if (LunaChat.getEventSender() != null) {
+            EventResult result = LunaChat.getEventSender().sendLunaChatChannelCreateEvent(channelName, member);
+            if (result.isCancelled()) return null;
+            name = result.getChannelName();
+        }
+        if (name == null || !name.contains(">")) return null;
+
+        Channel channel = newChannel(name);
+        channels.put(name.toLowerCase(), channel);
+        // Channel#save intentionally ignores personal channels.
+        return channel;
+    }
+
+    private Channel newChannel(String name) {
+        if (LunaChat.getMode() == LunaChatMode.BUKKIT) return new BukkitChannel(name);
+        if (LunaChat.getMode() == LunaChatMode.BUNGEE) return new BungeeChannel(name);
+        return new StandaloneChannel(name);
     }
 
     /**
@@ -494,6 +520,11 @@ public class ChannelManager implements LunaChatAPI {
     public synchronized void applyAuthoritySnapshot(List<ChannelDescriptor> snapshot) {
         if (!authorityManaged) throw new IllegalStateException("not a network edge");
         HashMap<String, Channel> replacement = new HashMap<String, Channel>();
+        // STATE replaces only the authority-owned catalog. Runtime-only /tell
+        // channels must survive periodic snapshots.
+        for (Map.Entry<String, Channel> entry : channels.entrySet()) {
+            if (entry.getValue().isPersonalChat()) replacement.put(entry.getKey(), entry.getValue());
+        }
         java.util.HashSet<ChannelId> ids = new java.util.HashSet<ChannelId>();
         java.util.HashSet<String> lookupNames = new java.util.HashSet<String>();
         for (ChannelDescriptor descriptor : snapshot) {

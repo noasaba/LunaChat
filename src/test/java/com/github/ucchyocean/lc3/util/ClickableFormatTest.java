@@ -16,6 +16,7 @@ import com.github.ucchyocean.lc3.member.ChannelMemberDummy;
 
 import junit.framework.TestCase;
 import net.md_5.bungee.api.chat.BaseComponent;
+import net.md_5.bungee.api.chat.ClickEvent;
 
 /**
  *
@@ -81,6 +82,31 @@ public class ClickableFormatTest extends TestCase {
         }
 
 //        assertTrue(f.toLegacyText().equals(makeLegacyText(comps)));
+    }
+
+    public void testHttpAndHttpsUrlsAreClickableWithoutTrailingPunctuation() {
+        ClickableFormat f = ClickableFormat.makeChannelClickableMessage(
+                "See https://example.com/path?q=1, then http://example.org/test.", "global");
+        BaseComponent[] comps = f.makeTextComponent();
+
+        assertEquals("See https://example.com/path?q=1, then http://example.org/test.",
+                Utility.stripColorCode(makeLegacyText(comps)));
+        assertTrue(hasOpenUrl(comps, "https://example.com/path?q=1"));
+        assertTrue(hasOpenUrl(comps, "http://example.org/test"));
+    }
+
+    public void testSingleTrailingCharacterIsNotDropped() {
+        ClickableFormat f = ClickableFormat.makeChannelClickableMessage("x", "global");
+        assertEquals("x", Utility.stripColorCode(makeLegacyText(f.makeTextComponent())));
+    }
+
+    private static boolean hasOpenUrl(BaseComponent[] components, String url) {
+        for (BaseComponent component : components) {
+            ClickEvent click = component.getClickEvent();
+            if (click != null && click.getAction() == ClickEvent.Action.OPEN_URL
+                    && url.equals(click.getValue())) return true;
+        }
+        return false;
     }
 
     private static String makeLegacyText(BaseComponent[] comps) {

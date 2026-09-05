@@ -90,4 +90,22 @@ public class AuthorityMembershipTest {
         assertEquals(List.of(member), manager.getChannel("global").getHided());
         assertEquals(descriptor.id(), manager.getChannel("global").getChannelId());
     }
+    @Test public void networkEdgeCanCreateTransientTellChannelAndRetainsItAcrossState() throws Exception {
+        var plugin = new LunaChatStandalone(Files.createTempDirectory("lunachat-tell-channel-test").toFile());
+        plugin.onEnable();
+        var role = LunaChatConfig.class.getDeclaredField("integrationRole");
+        role.setAccessible(true); role.set(plugin.getLunaChatConfig(), "network_edge");
+        var manager = new ChannelManager();
+        var descriptor = new ChannelDescriptor(ChannelId.random(), "global", Set.of(), true);
+        manager.applyAuthoritySnapshot(List.of(descriptor));
+
+        assertNull(manager.createChannel("paper-local", new ChannelMemberOther("sender")));
+        var tell = manager.createPersonalChannel("sender>recipient", new ChannelMemberOther("sender"));
+        assertNotNull(tell);
+        assertTrue(tell.isPersonalChat());
+
+        manager.applyAuthoritySnapshot(List.of(descriptor));
+        assertSame(tell, manager.getChannel("sender>recipient"));
+        assertEquals(descriptor.id(), manager.getChannel("global").getChannelId());
+    }
 }

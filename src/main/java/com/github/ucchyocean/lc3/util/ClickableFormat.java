@@ -41,6 +41,8 @@ public class ClickableFormat {
             "＜type=SUGGEST_COMMAND text=\"%s\" hover=\"%s\" command=\"%s\"＞";
     private static final String PLACEHOLDER_PATTERN =
             "＜type=(SUGGEST_COMMAND|RUN_COMMAND) text=\"([^\"]*)\" hover=\"([^\"]*)\" command=\"([^\"]*)\"＞";
+    private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s§]+", Pattern.CASE_INSENSITIVE);
+    private static final String URL_TRAILING_PUNCTUATION = ".,!?;:)]}";
 
     private KeywordReplacer message;
 
@@ -193,9 +195,7 @@ public class ClickableFormat {
 
             // マッチする箇所までの文字列を取得する
             if ( lastIndex < matcher.start() ) {
-                for ( BaseComponent c : TextComponent.fromLegacyText(message.substring(lastIndex, matcher.start())) ) {
-                    components.add(c);
-                }
+                addLegacyTextWithClickableUrls(components, message.substring(lastIndex, matcher.start()));
             }
 
             // マッチした箇所の文字列を解析して追加する
@@ -230,16 +230,52 @@ public class ClickableFormat {
             lastIndex = matcher.end();
         }
 
-        if ( lastIndex < message.length() - 1 ) {
+        if ( lastIndex < message.length() ) {
             // 残りの部分の文字列を取得する
-            for ( BaseComponent c : TextComponent.fromLegacyText(message.substring(lastIndex)) ) {
-                components.add(c);
-            }
+            addLegacyTextWithClickableUrls(components, message.substring(lastIndex));
         }
 
         BaseComponent[] result = new BaseComponent[components.size()];
         components.toArray(result);
         return result;
+    }
+
+    private static void addLegacyTextWithClickableUrls(List<BaseComponent> output, String legacyText) {
+        for (BaseComponent component : TextComponent.fromLegacyText(legacyText)) {
+            if (!(component instanceof TextComponent)) {
+                output.add(component);
+                continue;
+            }
+            TextComponent textComponent = (TextComponent) component;
+            String text = textComponent.getText();
+            Matcher matcher = URL_PATTERN.matcher(text);
+            int last = 0;
+            while (matcher.find()) {
+                if (last < matcher.start()) output.add(copyWithText(textComponent, text.substring(last, matcher.start())));
+                String matched = matcher.group();
+                int urlLength = matched.length();
+                while (urlLength > 0 && URL_TRAILING_PUNCTUATION.indexOf(matched.charAt(urlLength - 1)) >= 0) {
+                    urlLength--;
+                }
+                if (urlLength == 0) continue;
+                String url = matched.substring(0, urlLength);
+                TextComponent link = copyWithText(textComponent, url);
+                link.setClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, url));
+                output.add(link);
+                if (urlLength < matched.length()) {
+                    output.add(copyWithText(textComponent, matched.substring(urlLength)));
+                }
+                last = matcher.end();
+            }
+            if (last < text.length()) output.add(copyWithText(textComponent, text.substring(last)));
+            else if (last == 0) output.add(textComponent);
+        }
+    }
+
+    private static TextComponent copyWithText(TextComponent source, String text) {
+        TextComponent copy = new TextComponent(source);
+        copy.setText(text);
+        return copy;
     }
 
     public String toLegacyText() {
