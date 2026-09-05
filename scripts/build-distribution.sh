@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${LUNACHAT_VERSION:-4.0.12-SNAPSHOT}"
+VERSION="${LUNACHAT_VERSION:-4.0.13-SNAPSHOT}"
 OUTPUT="${ROOT_DIR}/LunaChat-${VERSION}-artifacts.zip"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/lunachat-distribution.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT

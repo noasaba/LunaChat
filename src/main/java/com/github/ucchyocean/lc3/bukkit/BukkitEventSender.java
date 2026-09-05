@@ -36,6 +36,8 @@ import com.github.ucchyocean.lc3.bukkit.event.LunaChatBukkitPostJapanizeEvent;
 import com.github.ucchyocean.lc3.bukkit.event.LunaChatBukkitPreChatEvent;
 import com.github.ucchyocean.lc3.event.EventResult;
 import com.github.ucchyocean.lc3.event.EventSenderInterface;
+import com.github.ucchyocean.lc3.LunaChat;
+import com.github.ucchyocean.lc3.LunaChatBukkit;
 import com.github.ucchyocean.lc3.member.ChannelMember;
 import com.github.ucchyocean.lc3.member.ChannelMemberBlock;
 import com.github.ucchyocean.lc3.member.ChannelMemberBukkitConsole;
@@ -73,6 +75,20 @@ public class BukkitEventSender implements EventSenderInterface {
                 originalMessage, event.getNgMaskedMessage(), event.getMessageFormat());
         legacy.setCancelled(event.isCancelled());
         Bukkit.getPluginManager().callEvent(legacy);
+
+        if (event.isCancelled() || legacy.isCancelled()) {
+            LunaChatBukkit.getInstance().getLogger().warning("Channel creation cancelled: name=" + channelName
+                    + ", bukkitEventCancelled=" + event.isCancelled()
+                    + ", legacyEventCancelled=" + legacy.isCancelled());
+            for (var listener : LunaChatBukkitChannelCreateEvent.getHandlerList().getRegisteredListeners()) {
+                LunaChatBukkit.getInstance().getLogger().warning("ChannelCreate listener: "
+                        + listener.getPlugin().getName() + " priority=" + listener.getPriority());
+            }
+            for (var listener : LunaChatChannelCreateEvent.getHandlerList().getRegisteredListeners()) {
+                LunaChatBukkit.getInstance().getLogger().warning("LegacyChannelCreate listener: "
+                        + listener.getPlugin().getName() + " priority=" + listener.getPriority());
+            }
+        }
 
         EventResult result = new EventResult();
         result.setCancelled(legacy.isCancelled());

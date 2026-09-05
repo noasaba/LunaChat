@@ -96,6 +96,10 @@ public class LunaChatMessageCommand {
         if ( channel == null ) {
             // チャンネルを作成して、送信者、受信者をメンバーにする
             channel = api.createChannel(cname, inviter);
+            if (channel == null) {
+                inviter.sendMessage("個人チャット用チャンネルを作成できないため、メッセージを送信できません。");
+                return;
+            }
             channel.setVisible(false);
             channel.addMember(inviter);
             channel.addMember(invited);
