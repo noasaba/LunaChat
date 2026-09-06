@@ -12,6 +12,7 @@ import java.util.UUID;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 public class PaperIntegrationServiceTest {
     private static final Instant CREATED = Instant.parse("2026-08-25T00:00:00Z");
@@ -50,5 +51,13 @@ public class PaperIntegrationServiceTest {
     @Test public void carrierDiagnosticDistinguishesNoPlayerFromAuthorityConnecting() {
         assertEquals("AWAITING_PLAYER_CARRIER", PaperIntegrationService.carrierDiagnostic(false));
         assertEquals("AUTHORITY_CONNECTING", PaperIntegrationService.carrierDiagnostic(true));
+    }
+
+    @Test public void tellAliasesAreDeclaredOnThePaperCommandSurface() throws Exception {
+        String plugin = new String(PaperIntegrationServiceTest.class.getResourceAsStream("/plugin.yml").readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(plugin.contains("tell:"));
+        assertTrue(plugin.contains("aliases: [msg, message, m, t]"));
+        assertTrue(plugin.contains("reply:"));
+        assertTrue(plugin.contains("aliases: [r]"));
     }
 }

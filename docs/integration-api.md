@@ -103,9 +103,13 @@ dependency and Paper-side mappings are not consulted in network mode.
 
 ## Explicit initial limitations
 
-Wire v1 routes accepted channel messages and external publishes. Existing
+Wire v6 routes accepted channel messages and external publishes. Existing
 network-wide membership, invite, mute/ban mutation, and cross-backend `/tell`
 and `/r` state have not yet been moved from the legacy Bungee implementation
 into the Velocity authority. Those operations remain backend-local and must not
 be advertised as globally committed while the authority is unavailable.
-Offline private messages are unsupported; no offline queue is created.
+Offline private messages are unsupported; no offline queue is created. In
+network mode, `/tell` and `/reply` remain Paper-local because personal channels
+are deliberately excluded from the canonical channel catalog. The command
+reports this limitation instead of claiming cross-server delivery. Use a shared
+public channel for cross-server communication.

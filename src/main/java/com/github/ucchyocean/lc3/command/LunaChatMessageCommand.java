@@ -7,6 +7,7 @@ package com.github.ucchyocean.lc3.command;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
 
 import com.github.ucchyocean.lc3.LunaChat;
 import com.github.ucchyocean.lc3.LunaChatAPI;
@@ -69,6 +70,18 @@ public class LunaChatMessageCommand {
      * @param message
      */
     protected void sendTellMessage(ChannelMember inviter, String invitedName, String message) {
+        if (inviter == null) return;
+        try {
+            sendTellMessageInternal(inviter, invitedName, message);
+        } catch (RuntimeException failure) {
+            LunaChat.getPlugin().log(Level.WARNING,
+                    "LunaChat /tell failed at personal-channel delivery: target=" + invitedName
+                            + " error=" + failure);
+            inviter.sendMessage("LunaChat could not send the private message (personal channel delivery failed).");
+        }
+    }
+
+    private void sendTellMessageInternal(ChannelMember inviter, String invitedName, String message) {
 
         if ( !PlayerNameValidator.isValidName(invitedName,
                 LunaChat.getConfig().getMaxPlayerNameLength()) ) {
@@ -81,6 +94,9 @@ public class LunaChatMessageCommand {
         if ( invited == null || !invited.isOnline()
                 || !PlayerVisibility.isVisibleTo(inviter, invited) ) {
             inviter.sendMessage(Messages.errmsgNotfoundPlayer(invitedName));
+            if ("network_edge".equals(LunaChat.getConfig().getIntegrationRole())) {
+                inviter.sendMessage("Cross-server and offline private messages are not supported; the target must be online on this Paper server.");
+            }
             return;
         }
 
@@ -107,6 +123,11 @@ public class LunaChatMessageCommand {
             channel.addMember(inviter);
             channel.addMember(invited);
             channel.setPrivateMessageTo(invited);
+        }
+
+        if (!channel.getMembers().contains(inviter) || !channel.getMembers().contains(invited)) {
+            inviter.sendMessage("LunaChat could not send the private message (personal channel membership was not applied).");
+            return;
         }
 
         // メッセージがあるなら送信する

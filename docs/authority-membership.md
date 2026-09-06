@@ -1,4 +1,4 @@
-# Authority membership (4.0.18-SNAPSHOT / wire 6)
+# Authority membership (4.0.19-SNAPSHOT / wire 6)
 
 Status: implementation and automated-test candidate. Live two-Paper/Discord
 verification remains required before deployment.
@@ -20,6 +20,7 @@ online:
 
 `create <name> [acceptsExternalMessages]`, `list`, `status`, `delete <name>`,
 `alias <name> <alias|->`, `external <name> <true|false>`, `global <name|->`,
+`setup <name>`,
 `default <name|->`, `force <name,...|->`, `joinable <name> <true|false>`,
 `password <name> <value|->`, `visible <name> <true|false>`, `world <name> <true|false>`,
 and `moderator|ban|mute <name> <uuid> <true|false> [expiryEpochMillis]` are

@@ -299,6 +299,8 @@ public class ChannelMemberPlayer extends ChannelMemberBukkit {
             return new ChannelMemberPlayer(nameOrUuid.substring(1));
         } else if ( PlayerNameValidator.isValidName(nameOrUuid,
                 LunaChat.getConfig().getMaxPlayerNameLength()) ) {
+            Player online = Bukkit.getPlayerExact(nameOrUuid);
+            if (online != null) return new ChannelMemberPlayer(online.getUniqueId());
             @SuppressWarnings("deprecation")
             OfflinePlayer op = Bukkit.getOfflinePlayer(nameOrUuid);
             if ( op == null ) return null;

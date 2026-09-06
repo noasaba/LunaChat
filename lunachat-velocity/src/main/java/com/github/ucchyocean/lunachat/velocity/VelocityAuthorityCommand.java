@@ -37,6 +37,7 @@ final class VelocityAuthorityCommand implements SimpleCommand {
                 case "alias" -> { require(args, 3); authority.setAlias(args[1], args[2].equals("-") ? "" : args[2]); source.sendPlainMessage("Updated LunaChat alias: " + args[1]); }
                 case "external" -> { require(args, 3); authority.setExternal(args[1], bool(args[2])); source.sendPlainMessage("Updated external-message policy: " + args[1]); }
                 case "global" -> { require(args, 2); authority.setSettings(value(args[1]), authoritySettingsDefault(), authoritySettingsForce()); source.sendPlainMessage("Updated LunaChat global channel."); }
+                case "setup" -> { require(args, 2); String name = value(args[1]); authority.setSettings(name, name, new LinkedHashSet<>(List.of(name))); source.sendPlainMessage("Configured LunaChat global, login-default, and force-join channel: " + name); }
                 case "default" -> { require(args, 2); authority.setSettings(authoritySettingsGlobal(), value(args[1]), authoritySettingsForce()); source.sendPlainMessage("Updated LunaChat login-default channel."); }
                 case "force" -> { require(args, 2); authority.setSettings(authoritySettingsGlobal(), authoritySettingsDefault(), names(args[1])); source.sendPlainMessage("Updated LunaChat force-join channels."); }
                 case "joinable" -> { require(args, 3); authority.setJoinable(args[1], bool(args[2])); source.sendPlainMessage("Updated join policy: " + args[1]); }
@@ -56,7 +57,7 @@ final class VelocityAuthorityCommand implements SimpleCommand {
     @Override public List<String> suggest(Invocation invocation) {
         String[] args = invocation.arguments();
         if (!allowed(invocation.source())) return List.of();
-        if (args.length <= 1) return matching(List.of("status", "list", "create", "delete", "alias", "external", "global", "default", "force", "joinable", "password", "visible", "world", "moderator", "ban", "mute"), args.length == 0 ? "" : args[0]);
+        if (args.length <= 1) return matching(List.of("status", "list", "create", "delete", "alias", "external", "global", "setup", "default", "force", "joinable", "password", "visible", "world", "moderator", "ban", "mute"), args.length == 0 ? "" : args[0]);
         String action = args[0].toLowerCase(Locale.ROOT);
         if (args.length == 2 && !action.equals("create") && !action.equals("force")) return matching(authority.channels().stream().map(c -> c.name()).toList(), args[1]);
         if (args.length == 3 && Set.of("external", "joinable", "visible", "world").contains(action)) return matching(List.of("true", "false"), args[2]);
@@ -64,7 +65,7 @@ final class VelocityAuthorityCommand implements SimpleCommand {
         return List.of();
     }
     private static void usage(CommandSource source) {
-        source.sendPlainMessage("Usage: /lunachat <status|list|create|delete|alias|external|global|default|force|joinable|password|visible|world|moderator|ban|mute>");
+        source.sendPlainMessage("Usage: /lunachat <status|list|create|delete|alias|external|global|setup|default|force|joinable|password|visible|world|moderator|ban|mute>");
     }
     private static List<String> matching(List<String> values, String prefix) { String lower = prefix.toLowerCase(Locale.ROOT); return values.stream().filter(value -> value.toLowerCase(Locale.ROOT).startsWith(lower)).toList(); }
     private static boolean bool(String value) { if (!value.equalsIgnoreCase("true") && !value.equalsIgnoreCase("false")) throw new IllegalArgumentException("expected true or false"); return Boolean.parseBoolean(value); }
