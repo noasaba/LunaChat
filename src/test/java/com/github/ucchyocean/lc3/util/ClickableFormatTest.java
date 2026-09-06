@@ -100,11 +100,27 @@ public class ClickableFormatTest extends TestCase {
         assertEquals("x", Utility.stripColorCode(makeLegacyText(f.makeTextComponent())));
     }
 
+    public void testChannelClickUsesPaperAliasNotVelocityAuthorityCommand() {
+        ClickableFormat f = ClickableFormat.makeChannelClickableMessage("%channel%", "global");
+        BaseComponent[] comps = f.makeTextComponent();
+        assertTrue(hasRunCommand(comps, "/lc join global"));
+        assertFalse(hasRunCommand(comps, "/lunachat join global"));
+    }
+
     private static boolean hasOpenUrl(BaseComponent[] components, String url) {
         for (BaseComponent component : components) {
             ClickEvent click = component.getClickEvent();
             if (click != null && click.getAction() == ClickEvent.Action.OPEN_URL
                     && url.equals(click.getValue())) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasRunCommand(BaseComponent[] components, String command) {
+        for (BaseComponent component : components) {
+            ClickEvent click = component.getClickEvent();
+            if (click != null && click.getAction() == ClickEvent.Action.RUN_COMMAND
+                    && command.equals(click.getValue())) return true;
         }
         return false;
     }

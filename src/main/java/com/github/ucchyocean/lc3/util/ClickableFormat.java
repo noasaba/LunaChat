@@ -32,7 +32,9 @@ import net.md_5.bungee.api.chat.TextComponent;
  */
 public class ClickableFormat {
 
-    private static final String JOIN_COMMAND_TEMPLATE = "/lunachat join %s";
+    // Velocity owns /lunachat for authority administration. The Paper-only
+    // alias avoids the proxy consuming player channel-switch clicks.
+    private static final String JOIN_COMMAND_TEMPLATE = "/lc join %s";
     private static final String TELL_COMMAND_TEMPLATE = "/tell %s";
 
     private static final String PLACEHOLDER_RUN_COMMAND =
