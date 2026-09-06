@@ -9,6 +9,8 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.channels.FileChannel;
+import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -21,7 +23,7 @@ import java.util.stream.Collectors;
 
 /** Durable, Velocity-owned channel catalog. Paper STATE frames only acknowledge it. */
 final class AuthorityChannelStore {
-    private static final int SCHEMA = 1;
+    private static final int SCHEMA = 2;
     private final Path file;
     private final Map<ChannelId, ChannelDescriptor> channels = new HashMap<>();
     private String globalChannel = "";
@@ -125,8 +127,8 @@ final class AuthorityChannelStore {
         Properties properties = new Properties();
         try (InputStream input = Files.newInputStream(file)) { properties.load(input); }
         int schema = Integer.parseInt(properties.getProperty("schema", "0"));
-        if (schema > SCHEMA) throw new IOException("future channel authority schema " + schema);
-        if (schema != SCHEMA) throw new IOException("unsupported channel authority schema " + schema);
+        if (schema > SCHEMA) throw new IOException("future channel authority data schema " + schema);
+        if (schema < 1) throw new IOException("unsupported channel authority data schema " + schema);
         for (String key : properties.stringPropertyNames()) {
             if (!key.startsWith("channel.") || !key.endsWith(".name")) continue;
             String idText = key.substring(8, key.length() - 5);
@@ -150,6 +152,13 @@ final class AuthorityChannelStore {
                 || (!defaultChannel.isEmpty() && find(defaultChannel).isEmpty())
                 || forceJoinChannels.stream().anyMatch(name -> find(name).isEmpty()))
             throw new IOException("authority settings reference unknown channel");
+        if (schema == 1) migrateSchema1();
+    }
+
+    private void migrateSchema1() throws IOException {
+        Path backup = file.resolveSibling(file.getFileName() + ".data-v1.bak");
+        if (!Files.exists(backup)) Files.copy(file, backup);
+        save();
     }
 
     private void validateLoadedCatalog() throws IOException {
@@ -175,13 +184,18 @@ final class AuthorityChannelStore {
             properties.setProperty(prefix + "external", Boolean.toString(channel.acceptsExternalMessages()));
         }
         Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
-        try (OutputStream output = Files.newOutputStream(temporary)) {
-            properties.store(output, "LunaChat Velocity authority state; schema is fail-closed");
-        }
         try {
-            Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-            Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+            try (OutputStream output = Files.newOutputStream(temporary)) {
+                properties.store(output, "LunaChat Velocity authority state; schema is fail-closed");
+            }
+            try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE)) { channel.force(true); }
+            try {
+                Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
         }
     }
 }

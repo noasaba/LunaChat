@@ -4,11 +4,13 @@ The independently managed versions are:
 
 | Surface | Current | Rule |
 | --- | --- | --- |
-| Product/plugins | `4.0.19-SNAPSHOT` | SemVer; Paper/Velocity released together |
+| Product/plugins | `4.0.20-SNAPSHOT` | SemVer; Paper/Velocity released together |
 | Public Integration API | `1.0.0-SNAPSHOT` | SemVer and binary compatibility within a major |
-| LCN wire | `5` | exact match; mixed incompatible versions fail closed |
-| Config schema | `1` | backup/idempotent migration; reject future schema |
-| Channel data schema | `1` | backup/idempotent migration; reject future schema |
+| LCN wire | `6` | exact match; mixed incompatible versions fail closed |
+| Velocity network config | `2` | sequential, line-preserving migration; reject future version |
+| Velocity channel data | `2` | machine-managed state migration; reject future schema |
+| Velocity membership data | `1` (`LCM1`) | binary machine state; fail closed on corruption |
+| Paper config/data | `1` | independent from Velocity config and data schemas |
 
 The API artifact is independently compilable and has no platform dependencies.
 Before releasing an API minor/patch, CI must compare its public signatures

@@ -1,4 +1,4 @@
-# Authority membership (4.0.19-SNAPSHOT / wire 6)
+# Authority membership (4.0.20-SNAPSHOT / wire 6)
 
 Status: implementation and automated-test candidate. Live two-Paper/Discord
 verification remains required before deployment.
@@ -110,7 +110,7 @@ members, password/visible/world setting, moderators, bans/mutes and expiries.
 It refuses overwriting its output and never modifies the source. It imports one
 selected Paper only; it never unions another backend. Review the output before
 installation. Place it
-beside Velocity's `channels.properties` BEFORE the first wire-5 startup.
+beside Velocity's `channels.properties` BEFORE the first wire-6 startup.
 Update all Paper and Velocity JARs together; wire 6 is incompatible with earlier wires.
 
 On the first start only, Velocity consumes the seed and creates the durable

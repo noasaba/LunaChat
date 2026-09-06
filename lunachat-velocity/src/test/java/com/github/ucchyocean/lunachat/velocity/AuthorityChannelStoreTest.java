@@ -51,4 +51,18 @@ class AuthorityChannelStoreTest {
         Files.writeString(directory.resolve("channels.properties"), "schema=999\n");
         assertThrows(IOException.class, () -> new AuthorityChannelStore(directory));
     }
+
+    @Test void machineStateMigratesSchemaOneWithIndependentBackup() throws Exception {
+        ChannelId id = ChannelId.random();
+        String legacy = "schema=1\ndefaultChannel=global\nforceJoinChannels=global\n"
+                + "channel." + id.value() + ".name=global\n"
+                + "channel." + id.value() + ".aliases=g\n"
+                + "channel." + id.value() + ".external=true\n";
+        Files.writeString(directory.resolve("channels.properties"), legacy);
+        AuthorityChannelStore migrated = new AuthorityChannelStore(directory);
+        assertEquals(id, migrated.snapshot().getFirst().id());
+        assertEquals("global", migrated.settings().globalChannel());
+        assertEquals(legacy, Files.readString(directory.resolve("channels.properties.data-v1.bak")));
+        assertTrue(Files.readString(directory.resolve("channels.properties")).contains("schema=2"));
+    }
 }

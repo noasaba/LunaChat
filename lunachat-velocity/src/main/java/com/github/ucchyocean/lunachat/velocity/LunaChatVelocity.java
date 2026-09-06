@@ -16,8 +16,6 @@ import com.velocitypowered.api.scheduler.ScheduledTask;
 import org.slf4j.Logger;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -25,7 +23,7 @@ import java.util.Base64;
 import java.util.Optional;
 import java.util.Properties;
 
-@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.19-SNAPSHOT",
+@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.20-SNAPSHOT",
         description = "LunaChat network authority for Velocity 4.1")
 public final class LunaChatVelocity implements LunaChatApiProvider {
     public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("lunachat", "network_v6");
@@ -47,8 +45,8 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         try {
             Properties config = loadConfig();
             byte[] secret = resolveSecret(config);
-            int pending = bounded(config, "maxPending", 256);
-            int receipts = bounded(config, "dedupCapacity", 4096);
+            int pending = VelocityNetworkConfig.bounded(config, "maxPending", 256);
+            int receipts = VelocityNetworkConfig.bounded(config, "receiptCapacity", 4096);
             proxy.getChannelRegistrar().register(CHANNEL);
             AuthorityChannelStore store = new AuthorityChannelStore(dataDirectory);
             authority = new VelocityNetworkAuthority(proxy, logger, CHANNEL, store, secret, pending, receipts);
@@ -90,21 +88,9 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
     }
 
     private Properties loadConfig() throws IOException {
-        Files.createDirectories(dataDirectory);
-        Path file = dataDirectory.resolve("network.properties");
-        Properties config = new Properties();
-        if (Files.exists(file)) {
-            try (InputStream input = Files.newInputStream(file)) { config.load(input); }
-        } else {
-            config.setProperty("schema", "1");
-            config.setProperty("sharePass", "");
-            config.setProperty("maxPending", "256");
-            config.setProperty("dedupCapacity", "4096");
-            try (OutputStream output = Files.newOutputStream(file)) { config.store(output, "LunaChat Velocity network configuration"); }
-            logger.warn("Set sharePass in network.properties and use the same integration.sharePass on every Paper server.");
-        }
-        int schema = Integer.parseInt(config.getProperty("schema", "0"));
-        if (schema != 1) throw new IOException(schema > 1 ? "future network config schema" : "unsupported network config schema");
+        boolean firstStart = !Files.exists(dataDirectory.resolve("network.properties"));
+        Properties config = new VelocityNetworkConfig(dataDirectory).load();
+        if (firstStart) logger.warn("Set sharePass in network.properties and use the same integration.sharePass on every Paper server.");
         return config;
     }
 
@@ -118,9 +104,4 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         return legacy;
     }
 
-    private static int bounded(Properties config, String key, int fallback) {
-        int value = Integer.parseInt(config.getProperty(key, Integer.toString(fallback)));
-        if (value < 1 || value > 1_000_000) throw new IllegalArgumentException(key + " is outside bounds");
-        return value;
-    }
 }

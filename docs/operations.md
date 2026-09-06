@@ -16,21 +16,25 @@ the authenticated HELLO/READY exchange. No `role`, `serverId`, or Base64 key is
 required. Install `LunaChat.jar` on each Paper and LunaBridge only on Velocity.
 
 Use a unique passphrase of at least 12 characters. LunaChat derives the actual
-256-bit key with PBKDF2-HMAC-SHA256. Legacy `sharedSecret`, `role`, and
-`serverId` settings remain readable for rollback and migration, but are not
-written into new configurations.
+256-bit key with PBKDF2-HMAC-SHA256. Legacy `sharedSecret` remains readable when
+`sharePass` is blank; LunaChat never invents or logs a replacement secret.
+Velocity `network.properties` is operator config at `config-version=2`.
+Migration preserves comments and unknown keys, creates a versioned backup,
+validates the complete result, and replaces the file atomically. Future config
+versions fail closed.
 
-Define channels once on Velocity in `plugins/lunachat/channels.properties`
-before starting Papers. For example:
+Define channels once with Velocity commands before starting Papers:
 
-```properties
-schema=1
-channel.11111111-1111-4111-8111-111111111111.name=global
-channel.11111111-1111-4111-8111-111111111111.aliases=g
-channel.11111111-1111-4111-8111-111111111111.external=true
+```text
+/lunachat create global true
+/lunachat setup global
+/lunachat list
 ```
 
-The UUID is the stable ChannelId and must not be regenerated for a rename.
+`channels.properties` is machine-managed state at data schema 2, not operator
+config. Do not edit it by hand. Migration from v1 creates
+`channels.properties.data-v1.bak` and writes atomically. The UUID is the stable
+ChannelId and must not be regenerated for a rename.
 Papers receive this catalog automatically; do not create or edit Paper
 `channels/*.yml` for network channels. Configure LunaBridge Discord mappings
 only on Velocity, against that ChannelId.
@@ -76,8 +80,8 @@ replace Velocity and every Paper value, then restart Velocity before Papers.
 5. Validate startup, role/capabilities, channel IDs, and a local message before
    enabling external publish.
 
-Rollback within schema 1 by stopping the topology, restoring plugin jars and
-the backups taken in step 1, then restarting Velocity first. For the first v0
+Rollback by stopping the topology, restoring plugin jars and matching config/state
+from the backups taken in step 1, then restarting Velocity first. For the first v0
 to v1 Paper migration, `migration-backup-v0/channels` is the automatic source
 for rollback; never copy it over live files while the server runs. A future
 schema error requires the newer binary or an operator-approved full restore,
