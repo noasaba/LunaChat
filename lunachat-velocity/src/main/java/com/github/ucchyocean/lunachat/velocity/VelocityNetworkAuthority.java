@@ -14,6 +14,8 @@ import com.github.ucchyocean.lunachat.core.network.ReplayWindow;
 import com.github.ucchyocean.lunachat.core.network.ReplayFrameException;
 import com.github.ucchyocean.lunachat.core.network.SecureFrame;
 import com.github.ucchyocean.lunachat.core.network.SecureFrameCodec;
+import com.github.ucchyocean.lunachat.core.network.PrivateMessageCodec;
+import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
 import com.github.ucchyocean.lunachat.api.RuntimeRole;
 import com.velocitypowered.api.event.connection.PluginMessageEvent;
 import com.velocitypowered.api.proxy.ProxyServer;
@@ -39,6 +41,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     private final ProxyServer proxy;
     private final Logger logger;
     private final ChannelIdentifier channel;
+    private final int protocolVersion;
     private final AuthorityChannelStore store;
     private final AuthorityMembershipStore memberships;
     private final InMemoryChannelDirectory directory = new InMemoryChannelDirectory();
@@ -46,6 +49,13 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
     private final AuthoritySnapshotCodec channelStates = new AuthoritySnapshotCodec();
     private final ChannelCreateCodec channelCreates = new ChannelCreateCodec();
+    private final PrivateMessageCodec privateMessages = new PrivateMessageCodec();
+    private final PresenceCodec presences = new PresenceCodec();
+    private volatile PresenceVisibilityProvider presenceVisibilityProvider;
+    private record PendingPrivate(String sourceNode, String targetNode, UUID target, Instant expires, int attempts) {}
+    private final Map<UUID, PendingPrivate> privatePending = new ConcurrentHashMap<>();
+    private final Map<UUID, PrivateMessageCodec.Request> privateRequests = new ConcurrentHashMap<>();
+    private final Map<UUID, SecureFrame> privateFrames = new ConcurrentHashMap<>();
     private record CreateKey(String node, UUID session, UUID request) {}
     private record CreateReceipt(ChannelCreateCodec.Request request, String result, Instant expires) {}
     private final Map<CreateKey, CreateReceipt> createReceipts = new LinkedHashMap<>();
@@ -69,12 +79,13 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         this.proxy = proxy;
         this.logger = logger;
         this.channel = channel;
+        this.protocolVersion = channel.getId().endsWith("network_v6") ? 6 : 7;
         this.store = store;
         this.memberships = new AuthorityMembershipStore(store.directory(), store.snapshot(), store.settings());
         this.pendingCapacity = pendingCapacity;
         this.receiptCapacity = receiptCapacity;
         directory.replace(store.snapshot());
-        secure = new SecureFrameCodec(6, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
+        secure = new SecureFrameCodec(protocolVersion, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
         proxy.getAllServers().forEach(server -> outboxes.put(server.getServerInfo().getName(),
                 new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
         runtime = IntegrationRuntime.authority(RuntimeRole.NETWORK_AUTHORITY, directory, this::commitExternal,
@@ -82,6 +93,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     IntegrationRuntime runtime() { return runtime; }
+    void setPresenceVisibilityProvider(PresenceVisibilityProvider provider) { presenceVisibilityProvider = provider; }
     synchronized java.util.List<com.github.ucchyocean.lunachat.api.ChannelDescriptor> channels() { return store.snapshot(); }
     synchronized AuthoritySnapshotCodec.Settings snapshotSettings() { return store.settings(); }
     @FunctionalInterface private interface StoreMutation { void run() throws IOException; }
@@ -187,6 +199,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
                 }
                 Session session = sessions.get(sourceNode);
                 sessions.put(sourceNode, new Session(session.id(), session.epoch(), acknowledged.revision()));
+                if (protocolVersion >= 7) sendPresenceSnapshot(sourceNode);
             } else if (frame.type() == FrameType.MEMBER_CHANGE && frame.logicalMessageId() != null) {
                 // Only authenticated server connections reach this path. Paper
                 // invokes it after its existing command permissions/events.
@@ -256,6 +269,10 @@ final class VelocityNetworkAuthority implements AutoCloseable {
                         }
                     });
                 }
+            } else if (frame.type() == FrameType.PRIVATE_REQUEST && frame.logicalMessageId() != null) {
+                handlePrivateRequest(source, frame);
+            } else if (frame.type() == FrameType.PRIVATE_ACK && frame.logicalMessageId() != null) {
+                handlePrivateAck(sourceNode, frame);
             } else if (frame.type() == FrameType.ACK && frame.logicalMessageId() != null) {
                 ReliableOutbox outbox = outboxes.get(sourceNode);
                 byte[] proposedPayload = outbox == null ? null
@@ -285,6 +302,69 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             sessions.remove(sourceNode);
             logger.warn("Rejected LunaChat frame from {}: {}", sourceNode, rejected.getMessage());
         }
+    }
+
+    private void handlePrivateRequest(ServerConnection source, SecureFrame frame) throws IOException, FrameAuthenticationException {
+        PrivateMessageCodec.Request request = privateMessages.decodeRequest(frame.payload());
+        logger.debug("PM request received: requestId={}, sourceNode={}", frame.logicalMessageId(), source.getServerInfo().getName());
+        var sender = proxy.getPlayer(request.sender()).orElse(null);
+        String sourceNode = source.getServerInfo().getName();
+        PrivateSenderValidation.Result senderValidation = PrivateSenderValidation.validate(
+                sender == null ? null : new PrivateSenderValidation.PlayerState(sender.getUniqueId(),
+                        sender.getUsername(), sender.getCurrentServer().map(s -> s.getServerInfo().getName()).orElse(null), sender.isActive()),
+                request.sender(), request.senderName(), sourceNode);
+        if (!senderValidation.accepted()) {
+            logger.info("PM sender rejected: requestId={}, reason={}", frame.logicalMessageId(), senderValidation.reason());
+            sendPrivateResult(sourceNode, frame, senderValidation.resultStatus(), null, "", null);
+            return;
+        }
+        var matches = proxy.getAllPlayers().stream()
+                .filter(player -> player.getUsername().equalsIgnoreCase(request.targetName())).toList();
+        if (matches.size() != 1) { sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.PRIVATE_RESULT,
+                frame.logicalMessageId(), privateMessages.encode(new PrivateMessageCodec.Result("NOT_FOUND", null, "", null)), Instant.now().plusSeconds(10)); return; }
+        var target = matches.iterator().next();
+        if (target.getUniqueId().equals(request.sender())) { sendPrivateResult(sourceNode, frame, "SELF", null, "", null); return; }
+        PresenceCodec.Visibility visibility = visibilityOf(target);
+        if (visibility != PresenceCodec.Visibility.PUBLIC) {
+            logger.info("PM visibility rejected: requestId={}, state={}", frame.logicalMessageId(), visibility);
+            sendPrivateResult(sourceNode, frame, "NOT_FOUND", null, "", null); return;
+        }
+        var current = target.getCurrentServer();
+        if (current.isEmpty()) { sendPrivateResult(sourceNode, frame, "NOT_FOUND", null, "", null); return; }
+        String targetNode = current.get().getServerInfo().getName();
+        if (!isCatalogSynchronized(targetNode)) { sendPrivateResult(sourceNode, frame, "BACKEND_UNAVAILABLE", null, "", null); return; }
+        privatePending.put(frame.logicalMessageId(), new PendingPrivate(sourceNode, targetNode, target.getUniqueId(), frame.expiresAt(), 0));
+        privateRequests.put(frame.logicalMessageId(), request); privateFrames.put(frame.logicalMessageId(), frame);
+        logger.debug("PM delivery queued: requestId={}, sourceNode={}, targetNode={}", frame.logicalMessageId(),
+                sourceNode, targetNode);
+        sendPrivateDelivery(frame.logicalMessageId(), frame, request, target.getUniqueId(), target.getUsername(), targetNode);
+    }
+
+    private void sendPrivateDelivery(UUID id, SecureFrame requestFrame, PrivateMessageCodec.Request request, UUID target, String targetName, String node) {
+        Session session = sessions.get(node); if (session == null) return;
+        sendNow(node, session.id(), session.epoch(), FrameType.PRIVATE_DELIVERY, id,
+                privateMessages.encode(new PrivateMessageCodec.Delivery(request.sender(), request.senderName(), target, targetName, request.content())), requestFrame.expiresAt());
+    }
+
+    private void handlePrivateAck(String targetNode, SecureFrame frame) throws IOException, FrameAuthenticationException {
+        PendingPrivate pending = privatePending.get(frame.logicalMessageId());
+        if (pending == null) return;
+        if (!pending.targetNode().equals(targetNode)) return;
+        String status = new String(frame.payload(), StandardCharsets.UTF_8);
+        if (!Set.of("DELIVERED", "NOT_FOUND", "RENDER_FAILED").contains(status)) {
+            throw new FrameAuthenticationException("invalid private acknowledgement status");
+        }
+        PrivateMessageCodec.Request request = privateRequests.get(frame.logicalMessageId());
+        privatePending.remove(frame.logicalMessageId()); privateRequests.remove(frame.logicalMessageId()); privateFrames.remove(frame.logicalMessageId());
+        Session source = sessions.get(pending.sourceNode()); if (source == null) return;
+        sendNow(pending.sourceNode(), source.id(), source.epoch(), FrameType.PRIVATE_RESULT, frame.logicalMessageId(),
+                privateMessages.encode(new PrivateMessageCodec.Result(status, pending.target(),
+                        request == null ? "" : request.targetName(), null)), Instant.now().plusSeconds(10));
+        logger.debug("PM delivery result: requestId={}, status={}", frame.logicalMessageId(), status);
+    }
+
+    private void sendPrivateResult(String node, SecureFrame frame, String status, UUID target, String name, String content) {
+        Session session=sessions.get(node); if(session!=null) sendNow(node,session.id(),session.epoch(),FrameType.PRIVATE_RESULT,frame.logicalMessageId(),privateMessages.encode(new PrivateMessageCodec.Result(status,target,name,content)),Instant.now().plusSeconds(10));
     }
 
     private synchronized CompletableFuture<AcceptedMessage> commitExternal(AcceptedMessage message) {
@@ -374,6 +454,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             inboundReceipts.values().removeIf(expiry -> !expiry.isAfter(now));
             inboundPending.values().removeIf(expiry -> !expiry.isAfter(now));
         }
+        processPrivatePending(now);
         outboxes.forEach((node, outbox) -> {
             Session session = sessions.get(node);
             if (session == null) return;
@@ -382,6 +463,72 @@ final class VelocityNetworkAuthority implements AutoCloseable {
                 sendAttempt(node, session, attempt);
             }
         });
+    }
+
+    private void processPrivatePending(Instant now) {
+        privatePending.forEach((id, pending) -> {
+            if (!pending.expires().isAfter(now)) {
+                completePrivateFailure(id, pending, "TIMEOUT");
+                return;
+            }
+            var target = proxy.getPlayer(pending.target()).orElse(null);
+            var current = target == null || !target.isActive() ? null : target.getCurrentServer().orElse(null);
+            if (current == null) {
+                completePrivateFailure(id, pending, "NOT_FOUND");
+                return;
+            }
+            String node = current.getServerInfo().getName();
+            if (node.equals(pending.targetNode())) return;
+            if (pending.attempts() >= 1 || !isCatalogSynchronized(node)) {
+                completePrivateFailure(id, pending, "BACKEND_UNAVAILABLE");
+                return;
+            }
+            PrivateMessageCodec.Request request = privateRequests.get(id);
+            SecureFrame requestFrame = privateFrames.get(id);
+            PendingPrivate retried = new PendingPrivate(pending.sourceNode(), node, pending.target(),
+                    pending.expires(), pending.attempts() + 1);
+            if (request == null || requestFrame == null || !privatePending.replace(id, pending, retried)) return;
+            sendPrivateDelivery(id, requestFrame, request, pending.target(), target.getUsername(), node);
+        });
+    }
+
+    private void completePrivateFailure(UUID id, PendingPrivate pending, String status) {
+        if (!privatePending.remove(id, pending)) return;
+        PrivateMessageCodec.Request request = privateRequests.remove(id);
+        SecureFrame requestFrame = privateFrames.remove(id);
+        if (requestFrame == null) return;
+        sendPrivateResult(pending.sourceNode(), requestFrame, status, pending.target(),
+                request == null ? "" : request.targetName(), null);
+        logger.debug("PM delivery result: requestId={}, status={}", id, status);
+    }
+
+    void publishPresence(PresenceCodec.Event event) {
+        byte[] payload = presences.encode(event);
+        sessions.forEach((node, session) -> sendNow(node, session.id(), session.epoch(), FrameType.PRESENCE,
+                event.eventId(), payload, Instant.now().plusSeconds(10)));
+    }
+
+    private void sendPresenceSnapshot(String node) {
+        Session session = sessions.get(node); if (session == null) return;
+        proxy.getAllPlayers().forEach(player -> player.getCurrentServer().ifPresent(server -> {
+            PresenceCodec.Visibility visibility = visibilityOf(player);
+            PresenceCodec.Event snapshot = new PresenceCodec.Event(UUID.randomUUID(), player.getUniqueId(),
+                    player.getUsername(), PresenceCodec.Kind.SNAPSHOT, null, server.getServerInfo().getName(), visibility);
+            sendNow(node, session.id(), session.epoch(), FrameType.PRESENCE, snapshot.eventId(),
+                    presences.encode(snapshot), Instant.now().plusSeconds(10));
+        }));
+    }
+
+    private PresenceCodec.Visibility visibilityOf(com.velocitypowered.api.proxy.Player player) {
+        PresenceVisibilityProvider provider = presenceVisibilityProvider;
+        if (provider == null) return PresenceCodec.Visibility.PUBLIC;
+        try {
+            PresenceCodec.Visibility visibility = provider.visibility(player);
+            return visibility == null ? PresenceCodec.Visibility.UNKNOWN : visibility;
+        } catch (RuntimeException failure) {
+            logger.warn("Presence visibility provider failed for player {}: {}", player.getUniqueId(), failure.getMessage());
+            return PresenceCodec.Visibility.UNKNOWN;
+        }
     }
 
     private synchronized LogicalAdmission reserveLogical(UUID logicalId, Instant expiry) {
@@ -424,14 +571,14 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     private void sendAttempt(String node, Session session, ReliableOutbox.Attempt attempt) {
-        SecureFrame frame = new SecureFrame(6, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
+                SecureFrame frame = new SecureFrame(protocolVersion, session.id(), session.epoch(), attempt.sequence(), attempt.frameId(),
                 attempt.logicalMessageId(), FrameType.MESSAGE, Instant.now(), attempt.expiresAt(), attempt.payload());
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }
 
     private void sendNow(String node, UUID sessionId, long epoch, FrameType type, UUID logicalId,
             byte[] payload, Instant expiresAt) {
-        SecureFrame frame = new SecureFrame(6, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
+        SecureFrame frame = new SecureFrame(protocolVersion, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
                 logicalId, type, Instant.now(), expiresAt, payload);
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }

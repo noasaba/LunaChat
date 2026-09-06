@@ -1,7 +1,7 @@
 # LCN2 network protocol
 
 LCN2 is an internal LunaChat protocol, independent of LunaBridge.
-Wire version 6 runs on `lunachat:network_v6` and has separate logical and secure
+Wire version 7 runs on `lunachat:network_v7` and has separate logical and secure
 frame identities.
 
 Each secure frame authenticates protocol, session UUID, startup epoch,
@@ -38,6 +38,31 @@ uses an online player as carrier; a cold/empty backend retains only its bounded
 Velocity outbox until a player creates a backend connection and handshake.
 This transport does not promise immediate delivery to a backend with no active
 server connection.
+
+Private messages use `PRIVATE_REQUEST`, `PRIVATE_DELIVERY`, `PRIVATE_ACK`, and
+`PRIVATE_RESULT`. They are bounded, UUID-addressed, deduplicated by logical
+messageId, and never enter the canonical channel catalog or the AcceptedMessage
+stream observed by LunaBridge. Success is returned only after the target Paper
+delivery loop reports `DELIVERED`; all lookup, hidden, carrier, backend, render,
+and timeout failures are presented as the same target-not-found message. Reply
+state is a successful UUID pair in session memory; logout/restart clears it and
+offline PM is intentionally unsupported.
+
+`PRESENCE` is separate from chat. Network-edge Paper suppresses Bukkit join and
+quit messages and renders one JOIN, MOVE, or QUIT notification. A visibility
+provider may return PUBLIC, HIDDEN, or UNKNOWN. Presence is a connection-state
+notification, not a Vanish state: ordinary players are PUBLIC when SVSync (or
+another provider) is absent, explicit HIDDEN is the only Vanish-like state,
+and UNKNOWN means the provider is still synchronizing. UNKNOWN is retried three
+times; if it remains unresolved the notification is withheld from normal users
+and a diagnostic is logged. Presence is not observed or retransmitted by
+LunaBridge. Wire 6 and wire 7 are incompatible and must not be mixed; a mixed
+deployment is unavailable until every component is upgraded.
+
+Seeing a `PRESENCE` event therefore does not mean that the player became Vanish;
+it only means the network observed JOIN, MOVE, or QUIT. A normal player being
+represented as presence is expected. Only an explicit provider result of
+`HIDDEN` is treated as Vanish for audience filtering.
 
 Velocity marks the registered plugin-message identifier handled before checking
 the source, then accepts only backend `ServerConnection` sources. This prevents

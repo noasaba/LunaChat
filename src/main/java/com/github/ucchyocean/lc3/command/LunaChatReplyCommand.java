@@ -8,6 +8,7 @@ package com.github.ucchyocean.lc3.command;
 import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.member.ChannelMember;
 import com.github.ucchyocean.lc3.util.PlayerVisibility;
+import com.github.ucchyocean.lc3.member.ChannelMemberBukkit;
 
 /**
  * 1:1チャット受信コマンド
@@ -28,6 +29,17 @@ public class LunaChatReplyCommand extends LunaChatMessageCommand {
 
         // senderからChannelMemberを作成する
         ChannelMember inviter = ChannelMember.getChannelMember(sender);
+
+        if ("network_edge".equals(com.github.ucchyocean.lc3.LunaChat.getConfig().getIntegrationRole())
+                && inviter instanceof ChannelMemberBukkit bukkit && bukkit.getPlayer() != null) {
+            java.util.UUID target = DataMaps.privateReplyMap.get(bukkit.getPlayer().getUniqueId());
+            String targetName = DataMaps.privateReplyNames.get(bukkit.getPlayer().getUniqueId());
+            if (target == null || targetName == null) { sender.sendMessage(Messages.errmsgNotfoundPM()); return true; }
+            if (args.length == 0) { sender.sendMessage(Messages.cmdmsgReplyInviter(inviter.getName(), targetName)); return true; }
+            String body = String.join(" ", args);
+            sendTellMessage(inviter, targetName, body);
+            return true;
+        }
 
         // 会話相手を履歴から取得する
         String invitedName = DataMaps.privateMessageMap.get(inviter.getName());

@@ -255,6 +255,8 @@ public class LunaChatBukkit extends JavaPlugin implements PluginInterface {
         return config;
     }
 
+    public PaperIntegrationService getIntegrationService() { return integrationService; }
+
     /**
      * VaultChat連携クラスを返す
      * @return VaultChatBridge

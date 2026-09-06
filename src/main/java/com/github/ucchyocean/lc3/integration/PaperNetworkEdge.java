@@ -2,6 +2,10 @@ package com.github.ucchyocean.lc3.integration;
 
 import com.github.ucchyocean.lc3.LunaChatBukkit;
 import com.github.ucchyocean.lc3.LunaChatConfig;
+import com.github.ucchyocean.lc3.channel.ChannelManager;
+import com.github.ucchyocean.lc3.channel.Channel;
+import com.github.ucchyocean.lc3.member.ChannelMember;
+import com.github.ucchyocean.lc3.util.PlayerVisibility;
 import com.github.ucchyocean.lunachat.api.AcceptedMessage;
 import com.github.ucchyocean.lunachat.core.network.AcceptedMessageCodec;
 import com.github.ucchyocean.lunachat.core.network.FrameAuthenticationException;
@@ -15,6 +19,8 @@ import com.github.ucchyocean.lunachat.core.network.ReplayFrameException;
 import com.github.ucchyocean.lunachat.core.network.SecureFrame;
 import com.github.ucchyocean.lunachat.core.network.SecureFrameCodec;
 import com.github.ucchyocean.lunachat.core.network.SharedPassphrase;
+import com.github.ucchyocean.lunachat.core.network.PrivateMessageCodec;
+import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.messaging.PluginMessageListener;
@@ -34,8 +40,8 @@ import java.util.concurrent.CompletableFuture;
 
 /** Authenticated, bounded Paper edge. Local chat never depends on this transport. */
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
-    static final String CHANNEL = "lunachat:network_v6";
-    private static final int PROTOCOL = 6;
+    static final String CHANNEL = "lunachat:network_v7";
+    private static final int PROTOCOL = 7;
     private final LunaChatBukkit plugin;
     private final PaperIntegrationService integration;
     private volatile String nodeId = "";
@@ -43,6 +49,8 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private final AcceptedMessageCodec messages = new AcceptedMessageCodec();
     private final AuthoritySnapshotCodec channelStates = new AuthoritySnapshotCodec();
     private final ChannelCreateCodec channelCreates = new ChannelCreateCodec();
+    private final PrivateMessageCodec privateMessages = new PrivateMessageCodec();
+    private final PresenceCodec presences = new PresenceCodec();
     private final Map<UUID, PendingChange> changes = new LinkedHashMap<>();
     private record PendingChange(AuthoritySnapshotCodec.Change change, Instant expires,
             CompletableFuture<Boolean> completion) {}
@@ -63,6 +71,9 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private record InboundPending(CompletableFuture<AcceptedMessage> completion, Instant expiresAt) {}
     private final Map<UUID, AcceptedMessage> inboundReceipts = new LinkedHashMap<>();
     private final Map<UUID, InboundPending> inboundPending = new LinkedHashMap<>();
+    private final Map<UUID, CompletableFuture<PrivateMessageCodec.Result>> privateRequests = new LinkedHashMap<>();
+    private final Map<UUID, Instant> privateReceipts = new LinkedHashMap<>();
+    private final Map<UUID, String> networkPlayers = new LinkedHashMap<>();
     private final UUID sessionId = UUID.randomUUID();
     private final long epoch = System.currentTimeMillis();
     private final AtomicLong sequence = new AtomicLong();
@@ -105,6 +116,17 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
         if (!outbox.offer(canonical.messageId(), messages.encode(canonical), canonical.expiresAt(), Instant.now())) {
             plugin.getLogger().warning("LunaChat network outbox full; local message remains local: " + message.messageId());
         }
+    }
+
+    CompletableFuture<PrivateMessageCodec.Result> requestPrivate(UUID sender, String senderName, String targetName, String content) {
+        CompletableFuture<PrivateMessageCodec.Result> result = new CompletableFuture<>();
+        if (!isReady() || privateRequests.size() >= 256) { result.complete(new PrivateMessageCodec.Result("UNAVAILABLE", null, "", null)); return result; }
+        UUID id = UUID.randomUUID(); privateRequests.put(id, result);
+        Player carrier = Bukkit.getOnlinePlayers().stream().findFirst().orElse(null);
+        if (carrier == null) { privateRequests.remove(id); result.complete(new PrivateMessageCodec.Result("CARRIER_UNAVAILABLE", null, "", null)); return result; }
+        send(carrier, FrameType.PRIVATE_REQUEST, id, privateMessages.encode(new PrivateMessageCodec.Request(sender,senderName,targetName,content)), Instant.now().plusSeconds(10));
+        Bukkit.getScheduler().runTaskLater(plugin, () -> { CompletableFuture<PrivateMessageCodec.Result> p=privateRequests.remove(id); if(p!=null)p.complete(new PrivateMessageCodec.Result("TIMEOUT",null,"",null)); }, 200L);
+        return result;
     }
 
     private void tick() {
@@ -228,6 +250,21 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                     throw new FrameAuthenticationException("logical identity mismatch");
                 }
                 receiveMessage(player, proposed);
+            } else if (frame.type() == FrameType.PRIVATE_RESULT && frame.logicalMessageId() != null) {
+                CompletableFuture<PrivateMessageCodec.Result> completion = privateRequests.remove(frame.logicalMessageId());
+                if (completion != null) completion.complete(privateMessages.decodeResult(frame.payload()));
+            } else if (frame.type() == FrameType.PRIVATE_DELIVERY && frame.logicalMessageId() != null && isReady()) {
+                PrivateMessageCodec.Delivery delivery = privateMessages.decodeDelivery(frame.payload());
+                UUID requestId = frame.logicalMessageId();
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    String status = receivePrivate(requestId, delivery);
+                    send(player, FrameType.PRIVATE_ACK, requestId, status.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(10));
+                });
+            } else if (frame.type() == FrameType.PRESENCE && isReady()) {
+                PresenceCodec.Event presence = presences.decode(frame.payload());
+                updateNetworkPlayers(presence);
+                Bukkit.getScheduler().runTask(plugin, () -> renderPresence(presence));
+                send(player, FrameType.PRESENCE_ACK, frame.logicalMessageId(), new byte[0], Instant.now().plusSeconds(10));
             }
         } catch (ReplayFrameException replay) {
             plugin.getLogger().fine("Discarded replayed LunaChat network frame");
@@ -237,6 +274,68 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             integration.networkUnavailable("AUTHORITY_FRAME_REJECTED");
             plugin.getLogger().warning("Rejected LunaChat network frame: " + rejected.getMessage());
         }
+    }
+
+    private synchronized String receivePrivate(UUID requestId, PrivateMessageCodec.Delivery delivery) {
+        Instant now = Instant.now();
+        privateReceipts.entrySet().removeIf(entry -> !entry.getValue().isAfter(now));
+        if (privateReceipts.containsKey(requestId)) {
+            plugin.getLogger().fine("PM duplicate delivery acknowledged: requestId=" + requestId);
+            return "DELIVERED";
+        }
+        Player target = Bukkit.getPlayer(delivery.target());
+        String status = target == null ? "NOT_FOUND" : deliverPrivate(target, delivery);
+        if ("DELIVERED".equals(status)) privateReceipts.put(requestId, now.plusSeconds(30));
+        plugin.getLogger().fine("PM delivery rendered: requestId=" + requestId + ", status=" + status);
+        return status;
+    }
+
+    private String deliverPrivate(Player target, PrivateMessageCodec.Delivery delivery) {
+        if (!target.getUniqueId().equals(delivery.target())) return "NOT_FOUND";
+        ChannelManager manager = integration.channelManager();
+        Channel channel = manager.createPersonalChannel(delivery.senderName() + ">" + delivery.targetName(), ChannelMember.getChannelMember(target));
+        if (channel == null) return "RENDER_FAILED";
+        channel.setVisible(false); channel.addMember(ChannelMember.getChannelMember(target));
+        channel.setPrivateMessageTo(ChannelMember.getChannelMember(target));
+        channel.chat(new com.github.ucchyocean.lc3.member.ChannelMemberOther(delivery.senderName()), delivery.content());
+        com.github.ucchyocean.lc3.command.DataMaps.rememberPrivate(delivery.sender(), delivery.senderName(),
+                delivery.target(), delivery.targetName());
+        return "DELIVERED";
+    }
+
+    private void renderPresence(PresenceCodec.Event p) {
+        if (p.kind() == PresenceCodec.Kind.SNAPSHOT) return;
+        if (p.visibility() == PresenceCodec.Visibility.PUBLIC) {
+            String text = switch (p.kind()) { case JOIN -> p.name()+"がサーバーに参加しました"; case MOVE -> p.name()+"が"+p.from()+"から"+p.to()+"へ移動しました"; case QUIT -> p.name()+"がサーバーから退出しました"; case SNAPSHOT -> ""; };
+            Bukkit.broadcastMessage(text);
+        } else if (p.visibility() == PresenceCodec.Visibility.HIDDEN) {
+            for (Player viewer : Bukkit.getOnlinePlayers()) if (viewer.hasPermission("lunachat.presence.hidden")) {
+                viewer.sendMessage("[presence hidden] "+p.name()+" "+p.kind().name().toLowerCase());
+            }
+        } else {
+            plugin.getLogger().fine("Presence notification withheld while visibility is UNKNOWN: player=" + p.player()
+                    + ", kind=" + p.kind() + ", from=" + p.from() + ", to=" + p.to());
+        }
+    }
+
+    private synchronized void updateNetworkPlayers(PresenceCodec.Event event) {
+        if (event.visibility() == PresenceCodec.Visibility.PUBLIC) {
+            if (event.kind() == PresenceCodec.Kind.QUIT) networkPlayers.remove(event.player());
+            else networkPlayers.put(event.player(), event.name());
+        } else {
+            networkPlayers.remove(event.player());
+        }
+    }
+
+    synchronized java.util.List<String> visibleNetworkPlayerNames(ChannelMember sender, String prefix) {
+        String needle = prefix == null ? "" : prefix.toLowerCase(java.util.Locale.ROOT);
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+        for (Player local : Bukkit.getOnlinePlayers()) {
+            ChannelMember member = ChannelMember.getChannelMember(local);
+            if (PlayerVisibility.isVisibleTo(sender, member) && local.getName().toLowerCase(java.util.Locale.ROOT).startsWith(needle)) names.add(local.getName());
+        }
+        for (String name : networkPlayers.values()) if (name.toLowerCase(java.util.Locale.ROOT).startsWith(needle)) names.add(name);
+        return java.util.List.copyOf(names);
     }
 
     private void receiveMessage(Player carrier, AcceptedMessage proposed) {

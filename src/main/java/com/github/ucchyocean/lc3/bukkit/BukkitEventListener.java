@@ -114,6 +114,7 @@ public class BukkitEventListener implements Listener {
 
         LunaChatConfig config = LunaChat.getConfig();
         Player player = event.getPlayer();
+        if ("network_edge".equals(config.getIntegrationRole())) event.setJoinMessage(null);
 
         // UUIDをキャッシュ
         LunaChat.getUUIDCacheData().put(player.getUniqueId().toString(), player.getName());
@@ -144,6 +145,8 @@ public class BukkitEventListener implements Listener {
      */
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
+
+        if ("network_edge".equals(LunaChat.getConfig().getIntegrationRole())) event.setQuitMessage(null);
 
         Player player = event.getPlayer();
         String pname = player.getName();

@@ -17,6 +17,8 @@ import com.github.ucchyocean.lc3.channel.ChannelManager;
 import com.github.ucchyocean.lc3.member.ChannelMember;
 import com.github.ucchyocean.lc3.util.PlayerNameValidator;
 import com.github.ucchyocean.lc3.util.PlayerVisibility;
+import com.github.ucchyocean.lc3.member.ChannelMemberBukkit;
+import com.github.ucchyocean.lunachat.core.network.PrivateMessageCodec;
 
 /**
  * 1:1チャット送信コマンド
@@ -83,6 +85,25 @@ public class LunaChatMessageCommand {
 
     private void sendTellMessageInternal(ChannelMember inviter, String invitedName, String message) {
 
+        if ("network_edge".equals(LunaChat.getConfig().getIntegrationRole()) && inviter instanceof ChannelMemberBukkit bukkit
+                && bukkit.getPlayer() != null) {
+            String body = message == null ? "" : message.trim();
+            if (body.isEmpty()) { inviter.sendMessage(Messages.errmsgCommand()); return; }
+            com.github.ucchyocean.lc3.LunaChatBukkit paper = (com.github.ucchyocean.lc3.LunaChatBukkit)LunaChat.getPlugin();
+            paper.getIntegrationService().requestPrivate(bukkit.getPlayer().getUniqueId(),
+                    inviter.getName(), invitedName, body).whenComplete((result, error) ->
+                org.bukkit.Bukkit.getScheduler().runTask(paper, () -> {
+                    paper.getLogger().fine("PM request completed: status=" + (error == null && result != null ? result.status() : "ERROR"));
+                    if (error != null || result == null || !"DELIVERED".equals(result.status())) {
+                        inviter.sendMessage(Messages.errmsgNotfoundPlayer(invitedName));
+                        return;
+                    }
+                    inviter.sendMessage("[" + inviter.getName() + " -> " + result.targetName() + "] " + body);
+                    DataMaps.rememberPrivate(bukkit.getPlayer().getUniqueId(), inviter.getName(), result.target(), result.targetName());
+                }));
+            return;
+        }
+
         if ( !PlayerNameValidator.isValidName(invitedName,
                 LunaChat.getConfig().getMaxPlayerNameLength()) ) {
             inviter.sendMessage(Messages.errmsgNotfoundPlayer(invitedName));
@@ -94,9 +115,6 @@ public class LunaChatMessageCommand {
         if ( invited == null || !invited.isOnline()
                 || !PlayerVisibility.isVisibleTo(inviter, invited) ) {
             inviter.sendMessage(Messages.errmsgNotfoundPlayer(invitedName));
-            if ("network_edge".equals(LunaChat.getConfig().getIntegrationRole())) {
-                inviter.sendMessage("Cross-server and offline private messages are not supported; the target must be online on this Paper server.");
-            }
             return;
         }
 
@@ -178,6 +196,12 @@ public class LunaChatMessageCommand {
     private List<String> getListPlayerNames(ChannelMember sender, String pre) {
         String prefix = pre.toLowerCase();
         List<String> items = new ArrayList<String>();
+        if ("network_edge".equals(LunaChat.getConfig().getIntegrationRole())) {
+            com.github.ucchyocean.lc3.integration.PaperIntegrationService integration =
+                    com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
+            if (integration != null) items.addAll(integration.visibleNetworkPlayerNames(sender, prefix));
+            return items;
+        }
         for ( String pname : PlayerVisibility.getVisibleOnlinePlayerNames(sender) ) {
             if ( pname.toLowerCase().startsWith(prefix) ) {
                 items.add(pname);

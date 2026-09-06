@@ -1,0 +1,10 @@
+package com.github.ucchyocean.lunachat.core.network;
+import java.io.*; import java.nio.charset.StandardCharsets; import java.util.UUID;
+/** Presence is deliberately a distinct payload; it is never an AcceptedMessage. */
+public final class PresenceCodec {
+ public enum Kind { JOIN, MOVE, QUIT, SNAPSHOT } public enum Visibility { PUBLIC, HIDDEN, UNKNOWN }
+ public record Event(UUID eventId, UUID player, String name, Kind kind, String from, String to, Visibility visibility) {}
+ public byte[] encode(Event e){try{var b=new ByteArrayOutputStream();var o=new DataOutputStream(b);o.writeByte(1);o.writeLong(e.eventId().getMostSignificantBits());o.writeLong(e.eventId().getLeastSignificantBits());o.writeLong(e.player().getMostSignificantBits());o.writeLong(e.player().getLeastSignificantBits());s(o,e.name());o.writeByte(e.kind().ordinal());s(o,e.from()==null?"":e.from());s(o,e.to()==null?"":e.to());o.writeByte(e.visibility().ordinal());return b.toByteArray();}catch(IOException x){throw new IllegalStateException(x);}}
+ public Event decode(byte[] p)throws IOException{var i=new DataInputStream(new ByteArrayInputStream(p));if(i.readUnsignedByte()!=1)throw new IOException("presence payload version");var e=new UUID(i.readLong(),i.readLong());var u=new UUID(i.readLong(),i.readLong());String n=s(i);int k=i.readUnsignedByte();String f=s(i),t=s(i);int v=i.readUnsignedByte();if(i.available()!=0||k>=Kind.values().length||v>=Visibility.values().length)throw new IOException("invalid presence payload");return new Event(e,u,n,Kind.values()[k],f.isEmpty()?null:f,t.isEmpty()?null:t,Visibility.values()[v]);}
+ private static void s(DataOutputStream o,String s)throws IOException{byte[] b=s.getBytes(StandardCharsets.UTF_8);if(b.length>256)throw new IllegalArgumentException("presence text too long");o.writeShort(b.length);o.write(b);} private static String s(DataInputStream i)throws IOException{int n=i.readUnsignedShort();if(n>256)throw new IOException("presence text too long");return new String(i.readNBytes(n),StandardCharsets.UTF_8);}
+}

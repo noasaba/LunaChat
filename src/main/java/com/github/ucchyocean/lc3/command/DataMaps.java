@@ -6,6 +6,7 @@
 package com.github.ucchyocean.lc3.command;
 
 import java.util.HashMap;
+import java.util.UUID;
 
 /**
  * データマップ
@@ -21,10 +22,20 @@ public class DataMaps {
 
     /** tell/rコマンドの送信者→受信者 のマップ */
     protected static HashMap<String, String> privateMessageMap;
+    /** UUID-only reply state for network mode; names are display/cache hints only. */
+    protected static HashMap<UUID, UUID> privateReplyMap;
+    protected static HashMap<UUID, String> privateReplyNames;
 
     static {
         inviteMap = new HashMap<String, String>();
         inviterMap = new HashMap<String, String>();
         privateMessageMap = new HashMap<String, String>();
+        privateReplyMap = new HashMap<UUID, UUID>();
+        privateReplyNames = new HashMap<UUID, String>();
+    }
+
+    public static synchronized void rememberPrivate(UUID sender, String senderName, UUID target, String targetName) {
+        privateReplyMap.put(sender, target); privateReplyNames.put(sender, targetName);
+        privateReplyMap.put(target, sender); privateReplyNames.put(target, senderName);
     }
 }

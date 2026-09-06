@@ -210,6 +210,19 @@ public final class PaperIntegrationService {
 
     public LunaChatIntegrationApi api() { return runtime; }
 
+    ChannelManager channelManager() { return manager; }
+
+    public CompletableFuture<com.github.ucchyocean.lunachat.core.network.PrivateMessageCodec.Result> requestPrivate(
+            UUID sender, String senderName, String targetName, String content) {
+        if (networkEdge == null) return CompletableFuture.completedFuture(
+                new com.github.ucchyocean.lunachat.core.network.PrivateMessageCodec.Result("UNAVAILABLE", null, "", null));
+        return networkEdge.requestPrivate(sender, senderName, targetName, content);
+    }
+
+    public java.util.List<String> visibleNetworkPlayerNames(ChannelMember sender, String prefix) {
+        return networkEdge == null ? java.util.List.of() : networkEdge.visibleNetworkPlayerNames(sender, prefix);
+    }
+
     void networkConnected() {
         runtime.mutableStatus().update(NetworkState.DEGRADED, "AWAITING_CHANNEL_CATALOG");
     }
