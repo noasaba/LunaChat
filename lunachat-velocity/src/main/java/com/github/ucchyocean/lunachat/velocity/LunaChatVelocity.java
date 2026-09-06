@@ -10,7 +10,6 @@ import com.velocitypowered.api.event.connection.PluginMessageEvent;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
-import com.velocitypowered.api.event.proxy.ListenerBoundEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
@@ -42,7 +41,6 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
     private volatile ScheduledTask networkTask;
     private volatile PresenceVisibilityProvider presenceVisibilityProvider;
     private final Map<UUID, String> lastPresenceServer = new HashMap<>();
-    private final VelocityStartupGate startupGate = new VelocityStartupGate();
 
     @Inject
     public LunaChatVelocity(ProxyServer proxy, Logger logger, @DataDirectory Path dataDirectory) {
@@ -53,12 +51,6 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
 
     @Subscribe
     public void onInitialize(ProxyInitializeEvent event) {
-        logger.info("LunaChat network authority is waiting for a successful Velocity listener bind");
-    }
-
-    @Subscribe
-    public void onListenerBound(ListenerBoundEvent event) {
-        if (!startupGate.onListenerBound()) return;
         try {
             Properties config = loadConfig();
             byte[] secret = resolveSecret(config);
@@ -73,7 +65,7 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
             logger.info("LunaChat network authority ready (API {}, wire 7; v6 peers are rejected)", authority.runtime().apiVersion());
         } catch (Exception failure) {
             logger.error("LunaChat authority failed closed during initialization", failure);
-            cleanupAuthority();
+            authority = null;
         }
     }
 
@@ -147,11 +139,6 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
 
     @Subscribe
     public void onShutdown(ProxyShutdownEvent event) {
-        startupGate.close();
-        cleanupAuthority();
-    }
-
-    private void cleanupAuthority() {
         VelocityNetworkAuthority current = authority;
         authority = null;
         ScheduledTask task = networkTask;
