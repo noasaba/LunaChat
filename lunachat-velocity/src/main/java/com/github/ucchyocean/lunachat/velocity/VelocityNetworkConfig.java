@@ -12,6 +12,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Base64;
 
 /** Line-preserving migration for the operator-edited Velocity configuration. */
 final class VelocityNetworkConfig {
@@ -31,15 +32,20 @@ final class VelocityNetworkConfig {
         String original = Files.readString(file, StandardCharsets.UTF_8);
         int version = version(original);
         if (version > CURRENT_VERSION) throw new IOException("future network config version " + version);
-        if (version < 1) throw new IOException("unsupported network config version " + version);
+        if (version < 0) throw new IOException("unsupported network config version " + version);
+        int originalVersion = version;
         String migrated = original;
         while (version < CURRENT_VERSION) {
-            migrated = switch (version) { case 1 -> migrate1To2(migrated); default -> throw new IOException("missing migration from network config version " + version); };
+            migrated = switch (version) {
+                case 0 -> migrate0To1(migrated);
+                case 1 -> migrate1To2(migrated);
+                default -> throw new IOException("missing migration from network config version " + version);
+            };
             version++;
         }
         validate(migrated);
         if (!migrated.equals(original)) {
-            Path backup = file.resolveSibling(file.getFileName() + ".config-v1.bak");
+            Path backup = file.resolveSibling(file.getFileName() + ".config-v" + originalVersion + ".bak");
             if (!Files.exists(backup)) Files.copy(file, backup);
             writeAtomic(migrated);
         }
@@ -51,7 +57,35 @@ final class VelocityNetworkConfig {
         String current = values.getProperty("config-version");
         if (current != null) return integer(current, "config-version");
         String legacy = values.getProperty("schema");
-        return legacy == null ? 0 : integer(legacy, "schema");
+        if (legacy != null) return integer(legacy, "schema");
+        validateUnversionedLegacy(values, text);
+        return 0;
+    }
+
+    private static void validateUnversionedLegacy(Properties values, String text) throws IOException {
+        if (text.isBlank() || values.isEmpty()) throw new IOException("empty unversioned network config");
+        boolean hasPassphrase = values.containsKey("sharePass");
+        boolean hasEncodedSecret = values.containsKey("sharedSecret");
+        if (hasPassphrase == hasEncodedSecret) {
+            throw new IOException("ambiguous unversioned network config: exactly one legacy secret key is required");
+        }
+        if (hasPassphrase && values.getProperty("sharePass", "").trim().length() < 12) {
+            throw new IOException("sharePass must contain at least 12 characters");
+        }
+        if (hasEncodedSecret && values.getProperty("sharedSecret", "").isBlank()) {
+            throw new IOException("legacy sharedSecret is empty");
+        }
+        if (hasEncodedSecret) validateEncodedSecret(values.getProperty("sharedSecret"));
+        if (values.containsKey("maxPending")) bounded(values, "maxPending", 256);
+        if (values.containsKey("dedupCapacity")) bounded(values, "dedupCapacity", 4096);
+    }
+
+    private static String migrate0To1(String text) {
+        StringBuilder result = new StringBuilder(text);
+        if (!text.endsWith("\n") && !text.endsWith("\r")) result.append('\n');
+        result.append("# Added by LunaChat: identifies the validated legacy Velocity config layout.\n")
+                .append("schema=1\n");
+        return result.toString();
     }
 
     private static String migrate1To2(String text) throws IOException {
@@ -99,6 +133,17 @@ final class VelocityNetworkConfig {
         bounded(values, "maxPending", 256); bounded(values, "receiptCapacity", 4096);
         String pass = values.getProperty("sharePass", "").trim();
         if (!pass.isEmpty() && pass.length() < 12) throw new IOException("sharePass must contain at least 12 characters");
+        if (values.containsKey("sharedSecret")) validateEncodedSecret(values.getProperty("sharedSecret"));
+    }
+
+    private static void validateEncodedSecret(String encoded) throws IOException {
+        try {
+            if (Base64.getDecoder().decode(encoded).length < 32) {
+                throw new IOException("legacy sharedSecret must decode to at least 32 bytes");
+            }
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("legacy sharedSecret is not valid Base64", invalid);
+        }
     }
 
     static int bounded(Properties values, String key, int fallback) throws IOException {

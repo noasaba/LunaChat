@@ -60,4 +60,37 @@ class VelocityNetworkConfigTest {
         assertEquals("", config.getProperty("sharePass"));
         assertEquals("QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=", config.getProperty("sharedSecret"));
     }
+
+    @Test void migratesKnownUnversionedLayoutThroughEveryVersion() throws Exception {
+        Path file = directory.resolve("network.properties");
+        String legacy = "# pre-version config\nsharePass=123456789012\nmaxPending=22\n"
+                + "dedupCapacity=44\ncustom.integration=preserved\n";
+        Files.writeString(file, legacy);
+        var migration = new VelocityNetworkConfig(directory);
+        var config = migration.load();
+        String once = Files.readString(file);
+        assertEquals("2", config.getProperty("config-version"));
+        assertEquals("44", config.getProperty("receiptCapacity"));
+        assertEquals("preserved", config.getProperty("custom.integration"));
+        assertTrue(once.contains("# migrated: schema=1"));
+        assertEquals(legacy, Files.readString(directory.resolve("network.properties.config-v0.bak")));
+        migration.load();
+        assertEquals(once, Files.readString(file));
+    }
+
+    @Test void rejectsEmptyUnknownOnlyAndCorruptUnversionedFilesWithoutMutation() throws Exception {
+        Path file = directory.resolve("network.properties");
+        for (String invalid : new String[] {
+                "",
+                "custom.integration=value\n",
+                "sharePass=short\nmaxPending=12\n",
+                "sharePass=123456789012\nmaxPending=broken\n",
+                "sharedSecret=not-base64\nmaxPending=12\n"
+        }) {
+            Files.writeString(file, invalid);
+            assertThrows(IOException.class, () -> new VelocityNetworkConfig(directory).load());
+            assertEquals(invalid, Files.readString(file));
+            assertFalse(Files.exists(directory.resolve("network.properties.config-v0.bak")));
+        }
+    }
 }
