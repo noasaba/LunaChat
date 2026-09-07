@@ -15,12 +15,15 @@ final class SVSyncVisibilityIntegration implements AutoCloseable {
             boolean connected, String server, long sequence, boolean explicitReappear) {}
 
     private final Object api;
+    private final Method hasState;
     private final Method getVisibility;
     private final Object subscription;
     private final Method close;
 
-    private SVSyncVisibilityIntegration(Object api, Method getVisibility, Object subscription, Method close) {
+    private SVSyncVisibilityIntegration(Object api, Method hasState, Method getVisibility,
+            Object subscription, Method close) {
         this.api = api;
+        this.hasState = hasState;
         this.getVisibility = getVisibility;
         this.subscription = subscription;
         this.close = close;
@@ -32,6 +35,7 @@ final class SVSyncVisibilityIntegration implements AutoCloseable {
             var container = proxy.getPluginManager().getPlugin("svsync");
             if (container.isEmpty() || container.get().getInstance().isEmpty()) return Optional.empty();
             Object api = container.get().getInstance().get();
+            Method hasState = api.getClass().getMethod("hasState", UUID.class);
             Method getVisibility = api.getClass().getMethod("getVisibility", UUID.class);
             Method addListener = java.util.Arrays.stream(api.getClass().getMethods())
                     .filter(method -> method.getName().equals("addVisibilityListener")
@@ -57,7 +61,7 @@ final class SVSyncVisibilityIntegration implements AutoCloseable {
             Object subscription = addListener.invoke(api, proxyListener);
             Method close = AutoCloseable.class.getMethod("close");
             logger.info("SVSync visibility state and transition integration enabled");
-            return Optional.of(new SVSyncVisibilityIntegration(api, getVisibility, subscription, close));
+            return Optional.of(new SVSyncVisibilityIntegration(api, hasState, getVisibility, subscription, close));
         } catch (ReflectiveOperationException | LinkageError | RuntimeException incompatible) {
             logger.warn("SVSync API is absent or incompatible; LunaChat presence defaults to PUBLIC: {}",
                     incompatible.toString());
@@ -67,6 +71,10 @@ final class SVSyncVisibilityIntegration implements AutoCloseable {
 
     PresenceCodec.Visibility visibility(UUID player) {
         try {
+            // SVSync deliberately uses UNKNOWN for a missing cache entry. That
+            // means "not observed", not vanished; only an explicit HIDDEN
+            // state may make an otherwise online Velocity player undiscoverable.
+            if (!Boolean.TRUE.equals(hasState.invoke(api, player))) return PresenceCodec.Visibility.PUBLIC;
             return parse(getVisibility.invoke(api, player));
         } catch (ReflectiveOperationException | LinkageError | RuntimeException failure) {
             return PresenceCodec.Visibility.UNKNOWN;

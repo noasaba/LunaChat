@@ -4,6 +4,7 @@ import com.github.ucchyocean.lunachat.api.LunaChatApiProvider;
 import com.github.ucchyocean.lunachat.api.LunaChatIntegrationApi;
 import com.github.ucchyocean.lunachat.core.network.SharedPassphrase;
 import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
+import com.github.ucchyocean.lunachat.core.network.NetworkProtocol;
 import com.google.inject.Inject;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.PluginMessageEvent;
@@ -38,7 +39,8 @@ import java.util.concurrent.TimeUnit;
         dependencies = {@Dependency(id = "svsync", optional = true)},
         description = "LunaChat network authority for Velocity 4.1")
 public final class LunaChatVelocity implements LunaChatApiProvider {
-    public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("lunachat", "network_v8");
+    public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create(
+            "lunachat", "network_v" + NetworkProtocol.VERSION);
     private final ProxyServer proxy;
     private final Logger logger;
     private final Path dataDirectory;
@@ -76,7 +78,8 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
             authority.setPresenceVisibilityProvider(presenceVisibilityProvider);
             proxy.getCommandManager().register("lunachat", new VelocityAuthorityCommand(authority), "lcauthority");
             networkTask = proxy.getScheduler().buildTask(this, this::tick).repeat(Duration.ofSeconds(1)).schedule();
-            logger.info("LunaChat network authority ready (API {}, wire 8; older peers are rejected)", authority.runtime().apiVersion());
+            logger.info("LunaChat network authority ready (API {}, wire {}; older peers are rejected)",
+                    authority.runtime().apiVersion(), NetworkProtocol.VERSION);
         } catch (Exception failure) {
             logger.error("LunaChat authority failed closed during initialization", failure);
             authority = null;

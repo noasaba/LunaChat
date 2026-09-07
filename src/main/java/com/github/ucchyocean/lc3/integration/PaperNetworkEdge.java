@@ -22,6 +22,7 @@ import com.github.ucchyocean.lunachat.core.network.SecureFrameCodec;
 import com.github.ucchyocean.lunachat.core.network.SharedPassphrase;
 import com.github.ucchyocean.lunachat.core.network.PrivateMessageCodec;
 import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
+import com.github.ucchyocean.lunachat.core.network.NetworkProtocol;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.messaging.PluginMessageListener;
@@ -41,8 +42,8 @@ import java.util.concurrent.CompletableFuture;
 
 /** Authenticated, bounded Paper edge. Local chat never depends on this transport. */
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
-    static final String CHANNEL = "lunachat:network_v8";
-    private static final int PROTOCOL = 7;
+    static final String CHANNEL = NetworkProtocol.CHANNEL;
+    static final int PROTOCOL = NetworkProtocol.VERSION;
     private final LunaChatBukkit plugin;
     private final PaperIntegrationService integration;
     private volatile String nodeId = "";

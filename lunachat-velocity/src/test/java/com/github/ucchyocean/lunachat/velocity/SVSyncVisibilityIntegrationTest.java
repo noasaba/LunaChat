@@ -22,6 +22,8 @@ class SVSyncVisibilityIntegrationTest {
     interface Listener { void onVisibilityChange(Change change); }
     static final class Api {
         Listener listener;
+        boolean hasState = true;
+        public boolean hasState(UUID player) { return hasState; }
         public Visibility getVisibility(UUID player) { return Visibility.HIDDEN; }
         public AutoCloseable addVisibilityListener(Listener listener) {
             this.listener = listener;
@@ -49,6 +51,10 @@ class SVSyncVisibilityIntegrationTest {
 
         assertEquals(com.github.ucchyocean.lunachat.core.network.PresenceCodec.Visibility.HIDDEN,
                 integration.visibility(player));
+        api.hasState = false;
+        assertEquals(com.github.ucchyocean.lunachat.core.network.PresenceCodec.Visibility.PUBLIC,
+                integration.visibility(player));
+        api.hasState = true;
         api.listener.onVisibilityChange(new Change(player, Visibility.HIDDEN, Visibility.PUBLIC,
                 true, "main", 42));
 

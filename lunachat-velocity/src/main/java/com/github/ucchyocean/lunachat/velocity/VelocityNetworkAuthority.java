@@ -16,6 +16,7 @@ import com.github.ucchyocean.lunachat.core.network.SecureFrame;
 import com.github.ucchyocean.lunachat.core.network.SecureFrameCodec;
 import com.github.ucchyocean.lunachat.core.network.PrivateMessageCodec;
 import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
+import com.github.ucchyocean.lunachat.core.network.NetworkProtocol;
 import com.github.ucchyocean.lunachat.api.RuntimeRole;
 import com.velocitypowered.api.event.connection.PluginMessageEvent;
 import com.velocitypowered.api.proxy.ProxyServer;
@@ -80,7 +81,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         this.logger = logger;
         this.channel = channel;
         this.protocolVersion = channel.getId().endsWith("network_v6") ? 6
-                : channel.getId().endsWith("network_v7") ? 7 : 8;
+                : channel.getId().endsWith("network_v7") ? 7 : NetworkProtocol.VERSION;
         this.store = store;
         this.memberships = new AuthorityMembershipStore(store.directory(), store.snapshot(), store.settings());
         this.pendingCapacity = pendingCapacity;
