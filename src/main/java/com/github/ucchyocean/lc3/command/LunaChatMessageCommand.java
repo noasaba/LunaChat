@@ -94,8 +94,12 @@ public class LunaChatMessageCommand {
                     inviter.getName(), invitedName, body).whenComplete((result, error) ->
                 org.bukkit.Bukkit.getScheduler().runTask(paper, () -> {
                     paper.getLogger().fine("PM request completed: status=" + (error == null && result != null ? result.status() : "ERROR"));
-                    if (error != null || result == null || !"DELIVERED".equals(result.status())) {
-                        inviter.sendMessage(Messages.errmsgNotfoundPlayer(invitedName));
+                    if (error != null || result == null) {
+                        inviter.sendMessage("LunaChat private message authority is unavailable.");
+                        return;
+                    }
+                    if (!"DELIVERED".equals(result.status())) {
+                        sendNetworkTellFailure(inviter, invitedName, result.status());
                         return;
                     }
                     inviter.sendMessage("[" + inviter.getName() + " -> " + result.targetName() + "] " + body);
@@ -160,6 +164,17 @@ public class LunaChatMessageCommand {
                 inviter.getName(), invited.getName());
 
         return;
+    }
+
+    static void sendNetworkTellFailure(ChannelMember sender, String targetName, String status) {
+        switch (status) {
+            case "NOT_FOUND" -> sender.sendMessage(Messages.errmsgNotfoundPlayer(targetName));
+            case "SELF" -> sender.sendMessage(Messages.errmsgCannotSendPMSelf());
+            case "TIMEOUT" -> sender.sendMessage("LunaChat private message delivery timed out; please try again.");
+            case "BACKEND_UNAVAILABLE" -> sender.sendMessage("LunaChat could not reach the player's server; please try again.");
+            case "RENDER_FAILED" -> sender.sendMessage("LunaChat could not render the private message on the player's server.");
+            default -> sender.sendMessage("LunaChat private message authority returned an unknown result.");
+        }
     }
 
     /**
