@@ -86,6 +86,13 @@ is a reappearance; UNKNOWN-to-PUBLIC never synthesizes LOGIN or MOVE. SuperVanis
 does not call LunaChat and does not depend on it. Older or incompatible SVSync
 APIs are isolated at the optional adapter boundary and fall back to PUBLIC.
 
+JOIN, MOVE, LOGIN, and QUIT deliveries use a bounded per-backend outbox and are
+removed by `PRESENCE_ACK`; Paper deduplicates retries by logical event ID. An
+unsynchronized event source or destination retains Bukkit's local JOIN/QUIT
+fallback and is excluded from delayed replay of that same event, preventing a
+duplicate after its catalog handshake. Other backends retain the event for up
+to 30 seconds so a short synchronization window does not silently lose it.
+
 Velocity marks the registered plugin-message identifier handled before checking
 the source, then accepts only backend `ServerConnection` sources. This prevents
 the proxy from forwarding client-origin spoof messages.

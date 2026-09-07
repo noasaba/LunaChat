@@ -50,20 +50,19 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VelocityExternalPublishTest {
-    @Test void presenceBeforeBackendHandshakeIsDeliveredOnceAfterCatalogSyncAndAcked() throws Exception {
-        try (Harness harness = new Harness(1)) {
-            var presence = new PresenceCodec.Event(UUID.randomUUID(), UUID.randomUUID(), "Alice",
-                    PresenceCodec.Kind.JOIN, null, "backend-a", PresenceCodec.Visibility.PUBLIC);
-            harness.authority.publishPresence(presence);
-            harness.authority.tick();
-            assertTrue(harness.sent.stream().noneMatch(frame -> frame.type() == FrameType.PRESENCE));
-
+    @Test void presenceBeforeDestinationHandshakeUsesLocalFallbackButStillReachesOtherBackends() throws Exception {
+        try (Harness harness = new Harness(2)) {
             harness.hello("backend-a");
             harness.sent.clear();
+            var presence = new PresenceCodec.Event(UUID.randomUUID(), UUID.randomUUID(), "Alice",
+                    PresenceCodec.Kind.JOIN, null, "backend-b", PresenceCodec.Visibility.PUBLIC);
+            harness.authority.publishPresence(presence);
             harness.authority.tick();
             var deliveries = harness.sent.stream().filter(frame -> frame.type() == FrameType.PRESENCE
                     && presence.eventId().equals(frame.logicalMessageId())).toList();
             assertEquals(1, deliveries.size());
+            assertEquals(0, harness.presenceOutboxSize("backend-b"),
+                    "unsynchronized destination keeps its Bukkit local join instead of a delayed duplicate");
             harness.presenceAck("backend-a", presence.eventId());
             assertEquals(0, harness.presenceOutboxSize("backend-a"));
         }

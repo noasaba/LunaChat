@@ -526,6 +526,12 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         Instant now = Instant.now();
         Instant expires = now.plusSeconds(30);
         presenceOutboxes.forEach((node, outbox) -> {
+            // An unsynchronized source/destination Paper deliberately keeps
+            // Bukkit's local JOIN/QUIT message. Replaying the same event after
+            // its handshake would duplicate that local fallback. Other nodes
+            // have no fallback, so retain their delivery until they synchronize.
+            boolean localEndpoint = node.equals(event.from()) || node.equals(event.to());
+            if (localEndpoint && !isCatalogSynchronized(node)) return;
             if (!outbox.offer(event.eventId(), payload, expires, now)) {
                 logger.warn("Presence outbox for {} rejected event {}", node, event.eventId());
             }
