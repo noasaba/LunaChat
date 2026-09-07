@@ -223,6 +223,10 @@ public final class PaperIntegrationService {
         return networkEdge == null ? java.util.List.of() : networkEdge.visibleNetworkPlayerNames(sender, prefix);
     }
 
+    public boolean isNetworkPresenceReady() {
+        return networkEdge != null && networkEdge.isReady();
+    }
+
     void networkConnected() {
         runtime.mutableStatus().update(NetworkState.DEGRADED, "AWAITING_CHANNEL_CATALOG");
     }

@@ -114,7 +114,12 @@ public class BukkitEventListener implements Listener {
 
         LunaChatConfig config = LunaChat.getConfig();
         Player player = event.getPlayer();
-        if ("network_edge".equals(config.getIntegrationRole())) event.setJoinMessage(null);
+        boolean networkEdge = "network_edge".equals(config.getIntegrationRole());
+        com.github.ucchyocean.lc3.integration.PaperIntegrationService integration =
+                com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
+        boolean authorityReady = integration != null && integration.isNetworkPresenceReady();
+        if (com.github.ucchyocean.lc3.integration.PaperPresencePolicy
+                .suppressLocalMessage(networkEdge, authorityReady)) event.setJoinMessage(null);
 
         // UUIDをキャッシュ
         LunaChat.getUUIDCacheData().put(player.getUniqueId().toString(), player.getName());
@@ -146,7 +151,12 @@ public class BukkitEventListener implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
 
-        if ("network_edge".equals(LunaChat.getConfig().getIntegrationRole())) event.setQuitMessage(null);
+        boolean networkEdge = "network_edge".equals(LunaChat.getConfig().getIntegrationRole());
+        com.github.ucchyocean.lc3.integration.PaperIntegrationService integration =
+                com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
+        boolean authorityReady = integration != null && integration.isNetworkPresenceReady();
+        if (com.github.ucchyocean.lc3.integration.PaperPresencePolicy
+                .suppressLocalMessage(networkEdge, authorityReady)) event.setQuitMessage(null);
 
         Player player = event.getPlayer();
         String pname = player.getName();
