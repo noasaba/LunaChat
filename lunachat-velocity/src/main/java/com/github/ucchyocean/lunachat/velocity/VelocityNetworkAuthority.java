@@ -62,6 +62,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     private final Map<CreateKey, CreateReceipt> createReceipts = new LinkedHashMap<>();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, ReliableOutbox> outboxes = new ConcurrentHashMap<>();
+    private final Map<String, ReliableOutbox> presenceOutboxes = new ConcurrentHashMap<>();
     /**
      * External publishes remain pending until a Paper edge acknowledges that
      * LunaChat accepted and rendered the canonical message.  Putting a frame
@@ -88,8 +89,11 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         this.receiptCapacity = receiptCapacity;
         directory.replace(store.snapshot());
         secure = new SecureFrameCodec(protocolVersion, secret, new ReplayWindow(receiptCapacity), Clock.systemUTC());
-        proxy.getAllServers().forEach(server -> outboxes.put(server.getServerInfo().getName(),
-                new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
+        proxy.getAllServers().forEach(server -> {
+            String node = server.getServerInfo().getName();
+            outboxes.put(node, new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1)));
+            presenceOutboxes.put(node, new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1)));
+        });
         runtime = IntegrationRuntime.authority(RuntimeRole.NETWORK_AUTHORITY, directory, this::commitExternal,
                 Clock.systemUTC(), "velocity", pendingCapacity, receiptCapacity);
     }
@@ -275,6 +279,9 @@ final class VelocityNetworkAuthority implements AutoCloseable {
                 handlePrivateRequest(source, frame);
             } else if (frame.type() == FrameType.PRIVATE_ACK && frame.logicalMessageId() != null) {
                 handlePrivateAck(sourceNode, frame);
+            } else if (frame.type() == FrameType.PRESENCE_ACK && frame.logicalMessageId() != null) {
+                ReliableOutbox presenceOutbox = presenceOutboxes.get(sourceNode);
+                if (presenceOutbox != null) presenceOutbox.acknowledge(frame.logicalMessageId());
             } else if (frame.type() == FrameType.ACK && frame.logicalMessageId() != null) {
                 ReliableOutbox outbox = outboxes.get(sourceNode);
                 byte[] proposedPayload = outbox == null ? null
@@ -438,8 +445,11 @@ final class VelocityNetworkAuthority implements AutoCloseable {
                 .map(server -> server.getServerInfo().getName()).collect(java.util.stream.Collectors.toUnmodifiableSet());
         activeNodes.forEach(node -> outboxes.computeIfAbsent(node,
                 ignored -> new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
+        activeNodes.forEach(node -> presenceOutboxes.computeIfAbsent(node,
+                ignored -> new ReliableOutbox(pendingCapacity, 8, Duration.ofSeconds(1))));
         outboxes.keySet().stream().filter(node -> !activeNodes.contains(node)).toList().forEach(node -> {
             outboxes.remove(node);
+            presenceOutboxes.remove(node);
             sessions.remove(node);
         });
         directory.replace(store.snapshot());
@@ -463,6 +473,13 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             if (!isCatalogSynchronized(node)) { sendState(node); return; }
             for (ReliableOutbox.Attempt attempt : outbox.pollDue(now, 32)) {
                 sendAttempt(node, session, attempt);
+            }
+        });
+        presenceOutboxes.forEach((node, outbox) -> {
+            Session session = sessions.get(node);
+            if (session == null || !isCatalogSynchronized(node)) return;
+            for (ReliableOutbox.Attempt attempt : outbox.pollDue(now, 32)) {
+                sendPresenceAttempt(node, session, attempt);
             }
         });
     }
@@ -506,8 +523,13 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     void publishPresence(PresenceCodec.Event event) {
         byte[] payload = presences.encode(event);
-        sessions.forEach((node, session) -> sendNow(node, session.id(), session.epoch(), FrameType.PRESENCE,
-                event.eventId(), payload, Instant.now().plusSeconds(10)));
+        Instant now = Instant.now();
+        Instant expires = now.plusSeconds(30);
+        presenceOutboxes.forEach((node, outbox) -> {
+            if (!outbox.offer(event.eventId(), payload, expires, now)) {
+                logger.warn("Presence outbox for {} rejected event {}", node, event.eventId());
+            }
+        });
     }
 
     private void sendPresenceSnapshot(String node) {
@@ -578,6 +600,13 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }
 
+    private void sendPresenceAttempt(String node, Session session, ReliableOutbox.Attempt attempt) {
+        SecureFrame frame = new SecureFrame(protocolVersion, session.id(), session.epoch(), attempt.sequence(),
+                attempt.frameId(), attempt.logicalMessageId(), FrameType.PRESENCE, Instant.now(),
+                attempt.expiresAt(), attempt.payload());
+        proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
+    }
+
     private void sendNow(String node, UUID sessionId, long epoch, FrameType type, UUID logicalId,
             byte[] payload, Instant expiresAt) {
         SecureFrame frame = new SecureFrame(protocolVersion, sessionId, epoch, sequence.incrementAndGet(), UUID.randomUUID(),
@@ -587,6 +616,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     @Override public void close() {
         sessions.clear();
+        presenceOutboxes.clear();
         pendingExternal.values().forEach(pending -> pending.completion().complete(null));
         pendingExternal.clear();
         runtime.close();

@@ -75,6 +75,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private final Map<UUID, InboundPending> inboundPending = new LinkedHashMap<>();
     private final Map<UUID, CompletableFuture<PrivateMessageCodec.Result>> privateRequests = new LinkedHashMap<>();
     private final Map<UUID, Instant> privateReceipts = new LinkedHashMap<>();
+    private final Map<UUID, Instant> presenceReceipts = new LinkedHashMap<>();
     private final Map<UUID, String> networkPlayers = new LinkedHashMap<>();
     private final UUID sessionId = UUID.randomUUID();
     private final long epoch = System.currentTimeMillis();
@@ -264,8 +265,10 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 });
             } else if (frame.type() == FrameType.PRESENCE && isReady()) {
                 PresenceCodec.Event presence = presences.decode(frame.payload());
-                updateNetworkPlayers(presence);
-                Bukkit.getScheduler().runTask(plugin, () -> renderPresence(presence));
+                if (admitPresence(frame.logicalMessageId(), frame.expiresAt())) {
+                    updateNetworkPlayers(presence);
+                    Bukkit.getScheduler().runTask(plugin, () -> renderPresence(presence));
+                }
                 send(player, FrameType.PRESENCE_ACK, frame.logicalMessageId(), new byte[0], Instant.now().plusSeconds(10));
             }
         } catch (ReplayFrameException replay) {
@@ -276,6 +279,18 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             integration.networkUnavailable("AUTHORITY_FRAME_REJECTED");
             plugin.getLogger().warning("Rejected LunaChat network frame: " + rejected.getMessage());
         }
+    }
+
+    private synchronized boolean admitPresence(UUID eventId, Instant expiresAt) {
+        Instant now = Instant.now();
+        presenceReceipts.entrySet().removeIf(entry -> !entry.getValue().isAfter(now));
+        if (presenceReceipts.containsKey(eventId)) return false;
+        if (presenceReceipts.size() >= dedupCapacity) {
+            var oldest = presenceReceipts.keySet().iterator();
+            if (oldest.hasNext()) presenceReceipts.remove(oldest.next());
+        }
+        presenceReceipts.put(eventId, expiresAt.plus(Duration.ofMinutes(5)));
+        return true;
     }
 
     private synchronized String receivePrivate(UUID requestId, PrivateMessageCodec.Delivery delivery) {
@@ -468,6 +483,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
         changes.values().forEach(p -> p.completion().complete(false)); changes.clear();
         creates.values().forEach(p -> p.completion.complete(PaperIntegrationService.ChannelCreationResult.UNAVAILABLE));
         creates.clear();
+        presenceReceipts.clear();
         ready.set(false);
         catalogSynchronized.set(false);
         nodeId = "";

@@ -15,6 +15,7 @@ import com.github.ucchyocean.lunachat.core.network.FrameType;
 import com.github.ucchyocean.lunachat.core.network.ReplayWindow;
 import com.github.ucchyocean.lunachat.core.network.SecureFrame;
 import com.github.ucchyocean.lunachat.core.network.SecureFrameCodec;
+import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
 import com.velocitypowered.api.event.connection.PluginMessageEvent;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.ServerConnection;
@@ -49,6 +50,25 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VelocityExternalPublishTest {
+    @Test void presenceBeforeBackendHandshakeIsDeliveredOnceAfterCatalogSyncAndAcked() throws Exception {
+        try (Harness harness = new Harness(1)) {
+            var presence = new PresenceCodec.Event(UUID.randomUUID(), UUID.randomUUID(), "Alice",
+                    PresenceCodec.Kind.JOIN, null, "backend-a", PresenceCodec.Visibility.PUBLIC);
+            harness.authority.publishPresence(presence);
+            harness.authority.tick();
+            assertTrue(harness.sent.stream().noneMatch(frame -> frame.type() == FrameType.PRESENCE));
+
+            harness.hello("backend-a");
+            harness.sent.clear();
+            harness.authority.tick();
+            var deliveries = harness.sent.stream().filter(frame -> frame.type() == FrameType.PRESENCE
+                    && presence.eventId().equals(frame.logicalMessageId())).toList();
+            assertEquals(1, deliveries.size());
+            harness.presenceAck("backend-a", presence.eventId());
+            assertEquals(0, harness.presenceOutboxSize("backend-a"));
+        }
+    }
+
     @Test void paperCreatedChannelIsCanonicalAndReplicatedToEveryBackend() throws Exception {
         try (Harness harness = new Harness(2)) {
             harness.hello("backend-a");
@@ -420,6 +440,12 @@ class VelocityExternalPublishTest {
             authority.handle(event(backend, ack));
         }
 
+        private void presenceAck(String backend, UUID eventId) {
+            SecureFrame ack = new SecureFrame(6, session(backend), epoch, 6, UUID.randomUUID(), eventId,
+                    FrameType.PRESENCE_ACK, Instant.now(), Instant.now().plusSeconds(30), new byte[0]);
+            authority.handle(event(backend, ack));
+        }
+
         private void message(String backend, AcceptedMessage message) {
             SecureFrame frame = new SecureFrame(6, session(backend), epoch, 2, UUID.randomUUID(), message.messageId(),
                     FrameType.MESSAGE, Instant.now(), Instant.now().plusSeconds(30), messages.encode(message));
@@ -461,6 +487,15 @@ class VelocityExternalPublishTest {
         @SuppressWarnings("unchecked")
         private int outboxSize(String backend) throws Exception {
             java.lang.reflect.Field field = VelocityNetworkAuthority.class.getDeclaredField("outboxes");
+            field.setAccessible(true);
+            Map<String, com.github.ucchyocean.lunachat.core.network.ReliableOutbox> outboxes =
+                    (Map<String, com.github.ucchyocean.lunachat.core.network.ReliableOutbox>) field.get(authority);
+            return outboxes.get(backend).size();
+        }
+
+        @SuppressWarnings("unchecked")
+        private int presenceOutboxSize(String backend) throws Exception {
+            java.lang.reflect.Field field = VelocityNetworkAuthority.class.getDeclaredField("presenceOutboxes");
             field.setAccessible(true);
             Map<String, com.github.ucchyocean.lunachat.core.network.ReliableOutbox> outboxes =
                     (Map<String, com.github.ucchyocean.lunachat.core.network.ReliableOutbox>) field.get(authority);
