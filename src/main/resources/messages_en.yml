@@ -5,6 +5,10 @@
 
 joinMessage: '&f[%color%%channel%&f]&7%player% has joined the channel.'
 quitMessage: '&f[%color%%channel%&f]&7%player% has left the channel.'
+presenceJoin: '%player% joined the server'
+presenceLogin: '%player% logged in'
+presenceMove: '%player% moved from %from% to %to%'
+presenceQuit: '%player% left the server'
 breakupMessage: '&f[%color%%channel%&f]&7The channel has been deleted.'
 banMessage: '&f[%color%%channel%&f]&7%player% was banned from the channel.'
 kickMessage: '&f[%color%%channel%&f]&7%player% was kicked from the channel.'

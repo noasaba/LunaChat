@@ -5,6 +5,10 @@
 
 joinMessage: '&f[%color%%channel%&f]&7%player% さんがチャンネルに参加しました。'
 quitMessage: '&f[%color%%channel%&f]&7%player% さんがチャンネルから退出しました。'
+presenceJoin: '%player%がサーバーに参加しました'
+presenceLogin: '%player%がログインしました'
+presenceMove: '%player%が%from%から%to%へ移動しました'
+presenceQuit: '%player%がサーバーから退出しました'
 breakupMessage: '&f[%color%%channel%&f]&7チャンネルが削除されました。'
 banMessage: '&f[%color%%channel%&f]&7%player% さんをチャンネルからBANしました。'
 kickMessage: '&f[%color%%channel%&f]&7%player% さんをチャンネルからキックしました。'

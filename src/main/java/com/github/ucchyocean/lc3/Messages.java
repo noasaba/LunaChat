@@ -88,6 +88,21 @@ public class Messages {
 
     // ここから下は自動生成メソッドです。変更をしないでください。
 
+    public static String presenceJoin(Object player) { return presence("presenceJoin", player, "", ""); }
+    public static String presenceLogin(Object player) { return presence("presenceLogin", player, "", ""); }
+    public static String presenceMove(Object player, Object from, Object to) { return presence("presenceMove", player, from, to); }
+    public static String presenceQuit(Object player) { return presence("presenceQuit", player, "", ""); }
+
+    private static String presence(String key, Object player, Object from, Object to) {
+        String msg = resources.getString(key);
+        if (msg == null) return "";
+        KeywordReplacer replacer = new KeywordReplacer(msg);
+        replacer.replace("%player%", player.toString());
+        replacer.replace("%from%", from.toString());
+        replacer.replace("%to%", to.toString());
+        return Utility.replaceColorCode(replacer.toString());
+    }
+
     // === Auto-generated methods area start. ===
 
     /**

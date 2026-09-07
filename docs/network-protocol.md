@@ -1,7 +1,7 @@
 # LCN2 network protocol
 
 LCN2 is an internal LunaChat protocol, independent of LunaBridge.
-Wire version 7 runs on `lunachat:network_v7` and has separate logical and secure
+Wire version 8 runs on `lunachat:network_v8` and has separate logical and secure
 frame identities.
 
 Each secure frame authenticates protocol, session UUID, startup epoch,
@@ -56,13 +56,32 @@ another provider) is absent, explicit HIDDEN is the only Vanish-like state,
 and UNKNOWN means the provider is still synchronizing. UNKNOWN is retried three
 times; if it remains unresolved the notification is withheld from normal users
 and a diagnostic is logged. Presence is not observed or retransmitted by
-LunaBridge. Wire 6 and wire 7 are incompatible and must not be mixed; a mixed
+LunaBridge. Wire 8 adds the LOGIN reveal event; older wires are incompatible and must not be mixed. A mixed
 deployment is unavailable until every component is upgraded.
 
 Seeing a `PRESENCE` event therefore does not mean that the player became Vanish;
-it only means the network observed JOIN, MOVE, or QUIT. A normal player being
+it only means the network observed JOIN, LOGIN, MOVE, or QUIT. A normal player being
 represented as presence is expected. Only an explicit provider result of
 `HIDDEN` is treated as Vanish for audience filtering.
+
+Velocity retains the registered-server names from actual connection events even
+while a player is HIDDEN. On a later PUBLIC observation, a player who joined
+while hidden produces LOGIN followed, when necessary, by one MOVE from the
+actual login server to the current server. A player who was already public does
+not get a fictional LOGIN; only a real hidden-period displacement is revealed.
+Multiple hidden moves are aggregated from the first relevant server to the
+current server. This bounds chat output to two lines while always identifying
+the current location; replaying every hop would turn rapid transfers into chat
+spam. Disconnect removes the UUID-scoped history, and stale hidden paths are
+bounded before reuse.
+
+Visibility integrations are consumer-independent: the optional provider only
+answers the current PUBLIC, HIDDEN, or UNKNOWN state for a Velocity Player.
+LunaChat polls that generic state and detects transitions itself. SuperVanish
+does not call LunaChat and does not depend on it. If SVSync supplies the provider,
+it must make state changes observable through this current-state query promptly;
+no LunaChat-specific callback is required. Without a provider the state is
+PUBLIC, preserving standalone behavior.
 
 Velocity marks the registered plugin-message identifier handled before checking
 the source, then accepts only backend `ServerConnection` sources. This prevents

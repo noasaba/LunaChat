@@ -26,21 +26,21 @@ import java.util.Base64;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
-import java.util.Map;
-import java.util.HashMap;
+import java.time.Instant;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Plugin(id = "lunachat", name = "LunaChat", version = "4.0.21-SNAPSHOT",
         description = "LunaChat network authority for Velocity 4.1")
 public final class LunaChatVelocity implements LunaChatApiProvider {
-    public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("lunachat", "network_v7");
+    public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("lunachat", "network_v8");
     private final ProxyServer proxy;
     private final Logger logger;
     private final Path dataDirectory;
     private volatile VelocityNetworkAuthority authority;
     private volatile ScheduledTask networkTask;
     private volatile PresenceVisibilityProvider presenceVisibilityProvider;
-    private final Map<UUID, String> lastPresenceServer = new HashMap<>();
+    private final PresenceHistory presenceHistory = new PresenceHistory();
 
     @Inject
     public LunaChatVelocity(ProxyServer proxy, Logger logger, @DataDirectory Path dataDirectory) {
@@ -61,8 +61,8 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
             authority = new VelocityNetworkAuthority(proxy, logger, CHANNEL, store, secret, pending, receipts);
             authority.setPresenceVisibilityProvider(presenceVisibilityProvider);
             proxy.getCommandManager().register("lunachat", new VelocityAuthorityCommand(authority), "lcauthority");
-            networkTask = proxy.getScheduler().buildTask(this, authority::tick).repeat(Duration.ofSeconds(1)).schedule();
-            logger.info("LunaChat network authority ready (API {}, wire 7; v6 peers are rejected)", authority.runtime().apiVersion());
+            networkTask = proxy.getScheduler().buildTask(this, this::tick).repeat(Duration.ofSeconds(1)).schedule();
+            logger.info("LunaChat network authority ready (API {}, wire 8; older peers are rejected)", authority.runtime().apiVersion());
         } catch (Exception failure) {
             logger.error("LunaChat authority failed closed during initialization", failure);
             authority = null;
@@ -120,21 +120,32 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
             logger.warn("Presence visibility remained UNKNOWN after bounded retry: player={}, kind={}, from={}, to={}",
                     player.getUniqueId(), event.kind(), event.from(), event.to());
         }
-        synchronized (lastPresenceServer) {
-            if (!player.isActive() && event.kind() != PresenceCodec.Kind.QUIT) return;
-            if (event.kind() == PresenceCodec.Kind.QUIT) {
-                lastPresenceServer.remove(event.player());
-            } else {
-                String actual = player.getCurrentServer().map(s -> s.getServerInfo().getName()).orElse(event.to());
-                String previous = lastPresenceServer.get(event.player());
-                if (actual == null || actual.equals(previous)) return;
-                event = new PresenceCodec.Event(event.eventId(), event.player(), event.name(),
-                        previous == null ? PresenceCodec.Kind.JOIN : PresenceCodec.Kind.MOVE,
-                        previous, actual, visibility);
-                lastPresenceServer.put(event.player(), actual);
-            }
+        if (!player.isActive() && event.kind() != PresenceCodec.Kind.QUIT) return;
+        if (event.kind() == PresenceCodec.Kind.QUIT) {
+            PresenceCodec.Event quit = presenceHistory.disconnected(event.player(), event.name(), Instant.now());
+            if (quit != null) current.publishPresence(quit);
+            return;
         }
-        current.publishPresence(event);
+        String actual = player.getCurrentServer().map(s -> s.getServerInfo().getName()).orElse(null);
+        if (actual == null) return;
+        var events = event.kind() == PresenceCodec.Kind.SNAPSHOT
+                ? presenceHistory.visibilityChanged(event.player(), event.name(), actual, visibility, Instant.now())
+                : presenceHistory.connected(event.player(), event.name(), actual, visibility, Instant.now());
+        events.forEach(current::publishPresence);
+    }
+
+    private void tick() {
+        VelocityNetworkAuthority current = authority;
+        if (current != null) current.tick();
+        if (current != null) proxy.getAllPlayers().forEach(player -> player.getCurrentServer().ifPresent(server -> {
+            PresenceCodec.Visibility visibility = PresenceVisibilityPolicy
+                    .resolve(presenceVisibilityProvider, player, 3).visibility();
+            presenceHistory.visibilityChanged(player.getUniqueId(), player.getUsername(),
+                    server.getServerInfo().getName(), visibility, Instant.now()).forEach(current::publishPresence);
+        }));
+        Set<UUID> active = proxy.getAllPlayers().stream().filter(com.velocitypowered.api.proxy.Player::isActive)
+                .map(com.velocitypowered.api.proxy.Player::getUniqueId).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        presenceHistory.discardStale(Instant.now(), active);
     }
 
     @Subscribe

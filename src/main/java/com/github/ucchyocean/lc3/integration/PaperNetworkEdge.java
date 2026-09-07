@@ -1,6 +1,7 @@
 package com.github.ucchyocean.lc3.integration;
 
 import com.github.ucchyocean.lc3.LunaChatBukkit;
+import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.LunaChatConfig;
 import com.github.ucchyocean.lc3.channel.ChannelManager;
 import com.github.ucchyocean.lc3.channel.Channel;
@@ -40,7 +41,7 @@ import java.util.concurrent.CompletableFuture;
 
 /** Authenticated, bounded Paper edge. Local chat never depends on this transport. */
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
-    static final String CHANNEL = "lunachat:network_v7";
+    static final String CHANNEL = "lunachat:network_v8";
     private static final int PROTOCOL = 7;
     private final LunaChatBukkit plugin;
     private final PaperIntegrationService integration;
@@ -306,8 +307,14 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private void renderPresence(PresenceCodec.Event p) {
         if (p.kind() == PresenceCodec.Kind.SNAPSHOT) return;
         if (p.visibility() == PresenceCodec.Visibility.PUBLIC) {
-            String text = switch (p.kind()) { case JOIN -> p.name()+"がサーバーに参加しました"; case MOVE -> p.name()+"が"+p.from()+"から"+p.to()+"へ移動しました"; case QUIT -> p.name()+"がサーバーから退出しました"; case SNAPSHOT -> ""; };
-            Bukkit.broadcastMessage(text);
+            String text = switch (p.kind()) {
+                case JOIN -> Messages.presenceJoin(p.name());
+                case LOGIN -> Messages.presenceLogin(p.name());
+                case MOVE -> Messages.presenceMove(p.name(), p.from(), p.to());
+                case QUIT -> Messages.presenceQuit(p.name());
+                case SNAPSHOT -> "";
+            };
+            if (!text.isEmpty()) Bukkit.broadcastMessage(text);
         } else if (p.visibility() == PresenceCodec.Visibility.HIDDEN) {
             for (Player viewer : Bukkit.getOnlinePlayers()) if (viewer.hasPermission("lunachat.presence.hidden")) {
                 viewer.sendMessage("[presence hidden] "+p.name()+" "+p.kind().name().toLowerCase());

@@ -79,7 +79,8 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         this.proxy = proxy;
         this.logger = logger;
         this.channel = channel;
-        this.protocolVersion = channel.getId().endsWith("network_v6") ? 6 : 7;
+        this.protocolVersion = channel.getId().endsWith("network_v6") ? 6
+                : channel.getId().endsWith("network_v7") ? 7 : 8;
         this.store = store;
         this.memberships = new AuthorityMembershipStore(store.directory(), store.snapshot(), store.settings());
         this.pendingCapacity = pendingCapacity;
