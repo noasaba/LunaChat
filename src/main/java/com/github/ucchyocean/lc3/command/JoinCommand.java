@@ -294,8 +294,8 @@ public class JoinCommand extends LunaChatSubCommand {
         return true;
     }
 
-    private boolean hasSpeakPermission(ChannelMember sender, String channelName) {
+    static boolean hasSpeakPermission(ChannelMember sender, String channelName) {
         String node = PERMISSION_SPEAK_PREFIX + "." + channelName;
-        return sender.isPermissionSet(node) && sender.hasPermission(node);
+        return !sender.isPermissionSet(node) || sender.hasPermission(node);
     }
 }
