@@ -12,6 +12,7 @@ import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.plugin.Plugin;
+import com.velocitypowered.api.plugin.Dependency;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
@@ -28,9 +29,13 @@ import java.util.Properties;
 import java.util.UUID;
 import java.time.Instant;
 import java.util.Set;
+import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @Plugin(id = "lunachat", name = "LunaChat", version = "4.0.21-SNAPSHOT",
+        dependencies = {@Dependency(id = "svsync", optional = true)},
         description = "LunaChat network authority for Velocity 4.1")
 public final class LunaChatVelocity implements LunaChatApiProvider {
     public static final MinecraftChannelIdentifier CHANNEL = MinecraftChannelIdentifier.create("lunachat", "network_v8");
@@ -41,6 +46,13 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
     private volatile ScheduledTask networkTask;
     private volatile PresenceVisibilityProvider presenceVisibilityProvider;
     private final PresenceHistory presenceHistory = new PresenceHistory();
+    private volatile SVSyncVisibilityIntegration svsyncVisibility;
+    private record QueuedVisibility(SVSyncVisibilityIntegration.Change change, long connectionGeneration) {}
+    private final ArrayDeque<QueuedVisibility> visibilityChanges = new ArrayDeque<>();
+    private final Object visibilityApplyLock = new Object();
+    private final Map<UUID, Long> connectionGenerations = new HashMap<>();
+    private final VisibilityChangeValidator visibilityChangeValidator = new VisibilityChangeValidator();
+    private boolean visibilityDrainScheduled;
 
     @Inject
     public LunaChatVelocity(ProxyServer proxy, Logger logger, @DataDirectory Path dataDirectory) {
@@ -59,6 +71,8 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
             proxy.getChannelRegistrar().register(CHANNEL);
             AuthorityChannelStore store = new AuthorityChannelStore(dataDirectory);
             authority = new VelocityNetworkAuthority(proxy, logger, CHANNEL, store, secret, pending, receipts);
+            svsyncVisibility = SVSyncVisibilityIntegration.connect(proxy, logger, this::queueVisibilityChange).orElse(null);
+            if (svsyncVisibility != null) presenceVisibilityProvider = player -> svsyncVisibility.visibility(player.getUniqueId());
             authority.setPresenceVisibilityProvider(presenceVisibilityProvider);
             proxy.getCommandManager().register("lunachat", new VelocityAuthorityCommand(authority), "lcauthority");
             networkTask = proxy.getScheduler().buildTask(this, this::tick).repeat(Duration.ofSeconds(1)).schedule();
@@ -83,7 +97,11 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
     @Subscribe
     public void onServerConnected(ServerConnectedEvent event) {
         VelocityNetworkAuthority current = authority; if (current == null) return;
+        drainVisibilityChanges();
         var previous = event.getPreviousServer();
+        if (previous.isEmpty()) synchronized (visibilityChanges) {
+            connectionGenerations.merge(event.getPlayer().getUniqueId(), 1L, Long::sum);
+        }
         PresenceCodec.Event presence = new PresenceCodec.Event(UUID.randomUUID(), event.getPlayer().getUniqueId(),
                 event.getPlayer().getUsername(), previous.isEmpty() ? PresenceCodec.Kind.JOIN : PresenceCodec.Kind.MOVE,
                 previous.map(s -> s.getServerInfo().getName()).orElse(null), event.getServer().getServerInfo().getName(), PresenceCodec.Visibility.UNKNOWN);
@@ -93,6 +111,10 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
     @Subscribe
     public void onDisconnect(DisconnectEvent event) {
         VelocityNetworkAuthority current = authority; if (current == null) return;
+        drainVisibilityChanges();
+        synchronized (visibilityChanges) {
+            connectionGenerations.merge(event.getPlayer().getUniqueId(), 1L, Long::sum);
+        }
         PresenceCodec.Event presence = new PresenceCodec.Event(UUID.randomUUID(), event.getPlayer().getUniqueId(),
                 event.getPlayer().getUsername(), PresenceCodec.Kind.QUIT, null, null, PresenceCodec.Visibility.UNKNOWN);
         publishPresenceWhenVisible(current, event.getPlayer(), presence, 0);
@@ -137,7 +159,7 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
     private void tick() {
         VelocityNetworkAuthority current = authority;
         if (current != null) current.tick();
-        if (current != null) proxy.getAllPlayers().forEach(player -> player.getCurrentServer().ifPresent(server -> {
+        if (current != null && svsyncVisibility == null) proxy.getAllPlayers().forEach(player -> player.getCurrentServer().ifPresent(server -> {
             PresenceCodec.Visibility visibility = PresenceVisibilityPolicy
                     .resolve(presenceVisibilityProvider, player, 3).visibility();
             presenceHistory.visibilityChanged(player.getUniqueId(), player.getUsername(),
@@ -148,6 +170,58 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         presenceHistory.discardStale(Instant.now(), active);
     }
 
+    private void queueVisibilityChange(SVSyncVisibilityIntegration.Change change) {
+        synchronized (visibilityChanges) {
+            if (!visibilityChangeValidator.reserve(change.sequence())) {
+                logger.warn("Discarded out-of-order SVSync visibility event: player={}, sequence={}",
+                        change.player(), change.sequence());
+                return;
+            }
+            long generation = connectionGenerations.getOrDefault(change.player(), 0L);
+            visibilityChanges.addLast(new QueuedVisibility(change, generation));
+            if (visibilityDrainScheduled) return;
+            visibilityDrainScheduled = true;
+        }
+        proxy.getScheduler().buildTask(this, this::drainVisibilityChanges).schedule();
+    }
+
+    private void drainVisibilityChanges() {
+        synchronized (visibilityApplyLock) {
+            while (true) {
+                QueuedVisibility queued;
+                synchronized (visibilityChanges) {
+                    queued = visibilityChanges.pollFirst();
+                    if (queued == null) {
+                        visibilityDrainScheduled = false;
+                        return;
+                    }
+                }
+                applyVisibilityChange(queued);
+            }
+        }
+    }
+
+    private void applyVisibilityChange(QueuedVisibility queued) {
+        SVSyncVisibilityIntegration.Change change = queued.change();
+        VelocityNetworkAuthority current = authority;
+        if (current == null) return;
+        var player = proxy.getPlayer(change.player()).orElse(null);
+        if (player == null) return;
+        long generation;
+        synchronized (visibilityChanges) {
+            generation = connectionGenerations.getOrDefault(change.player(), 0L);
+        }
+        String currentServer = player.getCurrentServer().map(server -> server.getServerInfo().getName()).orElse(null);
+        if (!visibilityChangeValidator.validAtApply(change, queued.connectionGeneration(), generation,
+                player.isActive(), currentServer)) {
+            logger.debug("Discarded stale SVSync visibility event: player={}, sequence={}, eventServer={}, currentServer={}",
+                    change.player(), change.sequence(), change.server(), currentServer);
+            return;
+        }
+        presenceHistory.visibilityChanged(change.player(), player.getUsername(), currentServer, change.current(),
+                change.explicitReappear(), Instant.now()).forEach(current::publishPresence);
+    }
+
     @Subscribe
     public void onShutdown(ProxyShutdownEvent event) {
         VelocityNetworkAuthority current = authority;
@@ -156,6 +230,14 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         networkTask = null;
         if (task != null) task.cancel();
         if (current != null) current.close();
+        SVSyncVisibilityIntegration visibility = svsyncVisibility;
+        svsyncVisibility = null;
+        if (visibility != null) visibility.close();
+        synchronized (visibilityChanges) {
+            visibilityChanges.clear();
+            connectionGenerations.clear();
+            visibilityDrainScheduled = false;
+        }
         proxy.getCommandManager().unregister("lunachat");
         proxy.getChannelRegistrar().unregister(CHANNEL);
     }

@@ -74,6 +74,16 @@ class PresenceHistoryTest {
     }
 
     @Test
+    void unknownToPublicIsNotAnExplicitReappearance() {
+        PresenceHistory history = new PresenceHistory();
+        UUID player = UUID.randomUUID();
+        history.connected(player, "Alice", "lobby", PresenceCodec.Visibility.UNKNOWN, NOW);
+
+        assertTrue(history.visibilityChanged(player, "Alice", "lobby", PresenceCodec.Visibility.PUBLIC,
+                false, NOW.plusSeconds(1)).isEmpty());
+    }
+
+    @Test
     void disconnectDiscardsHistoryAndUuidStatesNeverMix() {
         PresenceHistory history = new PresenceHistory();
         UUID first = UUID.randomUUID();

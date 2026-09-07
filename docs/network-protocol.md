@@ -77,11 +77,14 @@ bounded before reuse.
 
 Visibility integrations are consumer-independent: the optional provider only
 answers the current PUBLIC, HIDDEN, or UNKNOWN state for a Velocity Player.
-LunaChat polls that generic state and detects transitions itself. SuperVanish
-does not call LunaChat and does not depend on it. If SVSync supplies the provider,
-it must make state changes observable through this current-state query promptly;
-no LunaChat-specific callback is required. Without a provider the state is
-PUBLIC, preserving standalone behavior.
+LunaChat optionally discovers the `svsync` Velocity plugin and consumes its
+generic current-state query and visibility listener directly; LunaBridge is not
+involved. Listener events are serialized on the LunaChat scheduler and accepted
+only when their global sequence, connection generation, connected flag, and
+current RegisteredServer still match. Only an explicit HIDDEN-to-PUBLIC change
+is a reappearance; UNKNOWN-to-PUBLIC never synthesizes LOGIN or MOVE. SuperVanish
+does not call LunaChat and does not depend on it. Older or incompatible SVSync
+APIs are isolated at the optional adapter boundary and fall back to PUBLIC.
 
 Velocity marks the registered plugin-message identifier handled before checking
 the source, then accepts only backend `ServerConnection` sources. This prevents
