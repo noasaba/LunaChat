@@ -35,7 +35,7 @@ public class ClickableFormat {
     // Velocity owns /lunachat for authority administration. The Paper-only
     // alias avoids the proxy consuming player channel-switch clicks.
     private static final String JOIN_COMMAND_TEMPLATE = "/lc join %s";
-    private static final String TELL_COMMAND_TEMPLATE = "/tell %s";
+    private static final String TELL_COMMAND_TEMPLATE = "/tell %s ";
 
     private static final String PLACEHOLDER_RUN_COMMAND =
             "＜type=RUN_COMMAND text=\"%s\" hover=\"%s\" command=\"%s\"＞";
@@ -76,13 +76,13 @@ public class ClickableFormat {
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd");
         SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss");
 
-        LunaChatAPI api = LunaChat.getAPI();
-
         KeywordReplacer msg = new KeywordReplacer(format);
 
         //msg.replace("%msg", message);
 
         if ( channel != null ) {
+
+            LunaChatAPI api = LunaChat.getAPI();
 
             // テンプレートのキーワードを、まず最初に置き換える
             for ( int i=0; i<=9; i++ ) {

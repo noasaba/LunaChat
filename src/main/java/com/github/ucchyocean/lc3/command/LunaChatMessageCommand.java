@@ -17,8 +17,12 @@ import com.github.ucchyocean.lc3.channel.ChannelManager;
 import com.github.ucchyocean.lc3.member.ChannelMember;
 import com.github.ucchyocean.lc3.util.PlayerNameValidator;
 import com.github.ucchyocean.lc3.util.PlayerVisibility;
+import com.github.ucchyocean.lc3.util.ClickableFormat;
 import com.github.ucchyocean.lc3.member.ChannelMemberBukkit;
+import com.github.ucchyocean.lc3.member.ChannelMemberOther;
 import com.github.ucchyocean.lunachat.core.network.PrivateMessageCodec;
+
+import net.md_5.bungee.api.chat.BaseComponent;
 
 /**
  * 1:1チャット送信コマンド
@@ -102,7 +106,8 @@ public class LunaChatMessageCommand {
                         sendNetworkTellFailure(inviter, invitedName, result.status());
                         return;
                     }
-                    inviter.sendMessage("[" + inviter.getName() + " -> " + result.targetName() + "] " + body);
+                    inviter.sendMessage(makeNetworkTellEcho(
+                            inviter.getName(), result.targetName(), body));
                     DataMaps.rememberPrivate(bukkit.getPlayer().getUniqueId(), inviter.getName(), result.target(), result.targetName());
                 }));
             return;
@@ -175,6 +180,13 @@ public class LunaChatMessageCommand {
             case "RENDER_FAILED" -> sender.sendMessage("LunaChat could not render the private message on the player's server.");
             default -> sender.sendMessage("LunaChat private message authority returned an unknown result.");
         }
+    }
+
+    static BaseComponent[] makeNetworkTellEcho(String senderName, String targetName, String body) {
+        ClickableFormat echo = ClickableFormat.makeFormat(
+                "[" + senderName + " -> %player] %msg", new ChannelMemberOther(targetName));
+        echo.replace("%msg", body);
+        return echo.makeTextComponent();
     }
 
     /**
