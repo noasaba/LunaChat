@@ -182,10 +182,14 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             if (frame.type() == FrameType.HELLO) {
                 Session existing = sessions.get(sourceNode);
                 // A periodic heartbeat is not a new handshake. Replaying the
-                // catalog here resets live Paper membership and opens a window
-                // where an in-flight MESSAGE appears to be unauthenticated.
+                // READY handshake here would reset Paper's synchronized flag.
+                // A STATE response refreshes Paper's authority lease without
+                // opening an unauthenticated window for in-flight messages.
                 if (existing != null && existing.id().equals(frame.sessionId())
-                        && existing.epoch() == frame.epoch() && isCatalogSynchronized(sourceNode)) return;
+                        && existing.epoch() == frame.epoch() && isCatalogSynchronized(sourceNode)) {
+                    sendState(sourceNode);
+                    return;
+                }
                 sessions.put(sourceNode, new Session(frame.sessionId(), frame.epoch(), -1));
                 sendNow(sourceNode, frame.sessionId(), frame.epoch(), FrameType.READY, null,
                         sourceNode.getBytes(StandardCharsets.UTF_8), Instant.now().plusSeconds(10));
@@ -551,14 +555,12 @@ final class VelocityNetworkAuthority implements AutoCloseable {
 
     private PresenceCodec.Visibility visibilityOf(com.velocitypowered.api.proxy.Player player) {
         PresenceVisibilityProvider provider = presenceVisibilityProvider;
-        if (provider == null) return PresenceCodec.Visibility.PUBLIC;
-        try {
-            PresenceCodec.Visibility visibility = provider.visibility(player);
-            return visibility == null ? PresenceCodec.Visibility.UNKNOWN : visibility;
-        } catch (RuntimeException failure) {
-            logger.warn("Presence visibility provider failed for player {}: {}", player.getUniqueId(), failure.getMessage());
-            return PresenceCodec.Visibility.UNKNOWN;
+        PresenceVisibilityPolicy.Decision decision = PresenceVisibilityPolicy.resolve(provider, player);
+        if (decision.publicFallback()) {
+            logger.warn("Presence snapshot visibility lookup failed; using PUBLIC fallback for online player {}",
+                    player.getUniqueId());
         }
+        return decision.visibility();
     }
 
     private synchronized LogicalAdmission reserveLogical(UUID logicalId, Instant expiry) {

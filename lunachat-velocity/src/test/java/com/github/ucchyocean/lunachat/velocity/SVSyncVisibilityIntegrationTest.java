@@ -3,6 +3,7 @@ package com.github.ucchyocean.lunachat.velocity;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
 import com.velocitypowered.api.plugin.PluginContainer;
 import com.velocitypowered.api.plugin.PluginManager;
 import com.velocitypowered.api.proxy.ProxyServer;
@@ -23,8 +24,18 @@ class SVSyncVisibilityIntegrationTest {
     static final class Api {
         Listener listener;
         boolean hasState = true;
+        Visibility visibility = Visibility.HIDDEN;
+        boolean removeStateDuringRead;
+        boolean failVisibilityRead;
         public boolean hasState(UUID player) { return hasState; }
-        public Visibility getVisibility(UUID player) { return Visibility.HIDDEN; }
+        public Visibility getVisibility(UUID player) {
+            if (failVisibilityRead) throw new LinkageError("simulated old API");
+            if (removeStateDuringRead) {
+                hasState = false;
+                return Visibility.UNKNOWN;
+            }
+            return visibility;
+        }
         public AutoCloseable addVisibilityListener(Listener listener) {
             this.listener = listener;
             return () -> this.listener = null;
@@ -66,6 +77,49 @@ class SVSyncVisibilityIntegrationTest {
                 revealed.stream().map(com.github.ucchyocean.lunachat.core.network.PresenceCodec.Event::kind).toList());
         integration.close();
         assertTrue(api.listener == null);
+    }
+
+    @Test
+    void cacheRemovalBetweenHasStateAndGetVisibilityDefaultsOnlinePlayerToPublic() {
+        Api api = new Api();
+        api.removeStateDuringRead = true;
+        UUID player = UUID.randomUUID();
+        var integration = SVSyncVisibilityIntegration.connect(proxy(api), logger(), ignored -> {}).orElseThrow();
+
+        assertEquals(PresenceCodec.Visibility.PUBLIC, integration.visibility(player));
+        assertTrue(!api.hasState);
+    }
+
+    @Test
+    void listenerKeepsUnknownCurrentDistinctFromAnExplicitReveal() {
+        Api api = new Api();
+        List<SVSyncVisibilityIntegration.Change> received = new ArrayList<>();
+        UUID player = UUID.randomUUID();
+        var integration = SVSyncVisibilityIntegration.connect(proxy(api), logger(), received::add).orElseThrow();
+
+        api.listener.onVisibilityChange(new Change(player, Visibility.HIDDEN, Visibility.UNKNOWN,
+                true, "main", 43));
+
+        assertEquals(1, received.size());
+        assertEquals(PresenceCodec.Visibility.HIDDEN, received.getFirst().previous());
+        assertEquals(PresenceCodec.Visibility.UNKNOWN, received.getFirst().current());
+        assertTrue(!received.getFirst().explicitReappear());
+        integration.close();
+    }
+
+    @Test
+    void queryFailureRetainsLastExplicitHiddenState() {
+        Api api = new Api();
+        UUID player = UUID.randomUUID();
+        var integration = SVSyncVisibilityIntegration.connect(proxy(api), logger(), ignored -> {}).orElseThrow();
+        integration.rememberConfirmed(new SVSyncVisibilityIntegration.Change(player,
+                PresenceCodec.Visibility.PUBLIC, PresenceCodec.Visibility.HIDDEN,
+                true, "main", 1, false));
+
+        api.failVisibilityRead = true;
+
+        assertEquals(PresenceCodec.Visibility.HIDDEN, integration.visibility(player));
+        integration.close();
     }
 
     @Test

@@ -27,4 +27,12 @@ class VisibilityChangeValidatorTest {
         assertFalse(validator.validAtApply(change, 2, 2, false, "main"));
         assertFalse(validator.validAtApply(change, 2, 2, true, "lobby"));
     }
+
+    @Test
+    void rejectsUnknownCurrentStateWithoutInventingAReveal() {
+        VisibilityChangeValidator validator = new VisibilityChangeValidator();
+        var ambiguous = new SVSyncVisibilityIntegration.Change(UUID.randomUUID(), PresenceCodec.Visibility.HIDDEN,
+                PresenceCodec.Visibility.UNKNOWN, true, "main", 1, false);
+        assertFalse(validator.validAtApply(ambiguous, 2, 2, true, "main"));
+    }
 }

@@ -50,6 +50,20 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VelocityExternalPublishTest {
+    @Test void synchronizedHelloHeartbeatRefreshesStateWithoutResettingSession() throws Exception {
+        try (Harness harness = new Harness(1)) {
+            harness.hello("backend-a");
+            harness.sent.clear();
+
+            SecureFrame heartbeat = new SecureFrame(6, harness.session("backend-a"), harness.epoch, 3,
+                    UUID.randomUUID(), null, FrameType.HELLO, Instant.now(), Instant.now().plusSeconds(30), new byte[0]);
+            harness.authority.handle(harness.event("backend-a", heartbeat));
+
+            assertEquals(1, harness.sent.stream().filter(frame -> frame.type() == FrameType.STATE).count());
+            assertEquals(0, harness.sent.stream().filter(frame -> frame.type() == FrameType.READY).count());
+        }
+    }
+
     @Test void presenceBeforeDestinationHandshakeUsesLocalFallbackButStillReachesOtherBackends() throws Exception {
         try (Harness harness = new Harness(2)) {
             harness.hello("backend-a");
@@ -156,7 +170,11 @@ class VelocityExternalPublishTest {
             harness.hello("backend-a");
             harness.sent.clear();
             harness.helloClaiming("backend-a", "");
-            assertTrue(harness.sent.isEmpty(), "same-session heartbeat must not reset/reapply the catalog");
+            assertEquals(1, harness.sent.stream().filter(frame -> frame.type() == FrameType.STATE).count(),
+                    "same-session heartbeat refreshes the Paper authority lease");
+            assertEquals(0, harness.sent.stream().filter(frame -> frame.type() == FrameType.READY).count(),
+                    "same-session heartbeat must not reset the catalog handshake");
+            harness.sent.clear();
             ExternalMessageRequest request = new ExternalMessageRequest(harness.channel.id(),
                     new ExternalMessageIdentity("test:external", "heartbeat"),
                     new MessageAuthor.External("test:external", "user", "User"),

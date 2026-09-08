@@ -7,23 +7,28 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PresenceVisibilityPolicyTest {
     @Test void noProviderMeansOrdinaryPlayerIsPublic() {
-        var result = PresenceVisibilityPolicy.resolve(null, null, 0);
+        var result = PresenceVisibilityPolicy.resolve(null, null);
         assertEquals(PresenceCodec.Visibility.PUBLIC, result.visibility());
-        assertFalse(result.retry());
+        assertFalse(result.publicFallback());
     }
 
     @Test void onlyExplicitHiddenIsHidden() {
-        var result = PresenceVisibilityPolicy.resolve(player -> PresenceCodec.Visibility.HIDDEN, null, 0);
+        var result = PresenceVisibilityPolicy.resolve(player -> PresenceCodec.Visibility.HIDDEN, null);
         assertEquals(PresenceCodec.Visibility.HIDDEN, result.visibility());
-        assertFalse(result.retry());
+        assertFalse(result.publicFallback());
     }
 
-    @Test void unknownRetriesThreeTimesThenPublishesUnknownForSuppression() {
+    @Test void unknownImmediatelyPublishesPublicReplacement() {
         var provider = (PresenceVisibilityProvider) player -> PresenceCodec.Visibility.UNKNOWN;
-        assertTrue(PresenceVisibilityPolicy.resolve(provider, null, 0).retry());
-        assertTrue(PresenceVisibilityPolicy.resolve(provider, null, 2).retry());
-        var finalState = PresenceVisibilityPolicy.resolve(provider, null, 3);
-        assertEquals(PresenceCodec.Visibility.UNKNOWN, finalState.visibility());
-        assertFalse(finalState.retry());
+        var finalState = PresenceVisibilityPolicy.resolve(provider, null);
+        assertEquals(PresenceCodec.Visibility.PUBLIC, finalState.visibility());
+        assertTrue(finalState.publicFallback());
+    }
+
+    @Test void apiFailureCannotMakeBothPaperAndNetworkNotificationsDisappear() {
+        PresenceVisibilityProvider broken = player -> { throw new LinkageError("old API"); };
+        var finalState = PresenceVisibilityPolicy.resolve(broken, null);
+        assertEquals(PresenceCodec.Visibility.PUBLIC, finalState.visibility());
+        assertTrue(finalState.publicFallback());
     }
 }

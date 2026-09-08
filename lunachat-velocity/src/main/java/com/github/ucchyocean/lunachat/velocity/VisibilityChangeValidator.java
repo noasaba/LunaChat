@@ -12,7 +12,8 @@ final class VisibilityChangeValidator {
 
     boolean validAtApply(SVSyncVisibilityIntegration.Change change, long queuedGeneration,
             long currentGeneration, boolean active, String currentServer) {
-        return change.connected() && active && queuedGeneration == currentGeneration
+        return change.current() != com.github.ucchyocean.lunachat.core.network.PresenceCodec.Visibility.UNKNOWN
+                && change.connected() && active && queuedGeneration == currentGeneration
                 && currentServer != null && currentServer.equals(change.server());
     }
 }

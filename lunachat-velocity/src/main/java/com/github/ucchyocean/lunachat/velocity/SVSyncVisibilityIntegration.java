@@ -6,6 +6,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 
@@ -19,14 +20,19 @@ final class SVSyncVisibilityIntegration implements AutoCloseable {
     private final Method getVisibility;
     private final Object subscription;
     private final Method close;
+    private final ConcurrentHashMap<UUID, PresenceCodec.Visibility> confirmed;
+    private final Logger logger;
 
     private SVSyncVisibilityIntegration(Object api, Method hasState, Method getVisibility,
-            Object subscription, Method close) {
+            Object subscription, Method close,
+            ConcurrentHashMap<UUID, PresenceCodec.Visibility> confirmed, Logger logger) {
         this.api = api;
         this.hasState = hasState;
         this.getVisibility = getVisibility;
         this.subscription = subscription;
         this.close = close;
+        this.confirmed = confirmed;
+        this.logger = logger;
     }
 
     static Optional<SVSyncVisibilityIntegration> connect(ProxyServer proxy, Logger logger,
@@ -45,6 +51,7 @@ final class SVSyncVisibilityIntegration implements AutoCloseable {
                 return Optional.empty();
             }
             Class<?> listenerType = addListener.getParameterTypes()[0];
+            ConcurrentHashMap<UUID, PresenceCodec.Visibility> confirmed = new ConcurrentHashMap<>();
             Object proxyListener = Proxy.newProxyInstance(listenerType.getClassLoader(), new Class<?>[]{listenerType},
                     (ignored, method, args) -> {
                         if (method.getDeclaringClass() == Object.class) return switch (method.getName()) {
@@ -54,14 +61,20 @@ final class SVSyncVisibilityIntegration implements AutoCloseable {
                             default -> null;
                         };
                         if (method.getName().equals("onVisibilityChange") && args != null && args.length == 1) {
-                            listener.accept(decode(args[0]));
+                            try {
+                                listener.accept(decode(args[0]));
+                            } catch (ReflectiveOperationException | LinkageError | RuntimeException incompatible) {
+                                logger.warn("Discarded incompatible SVSync visibility transition: {}",
+                                        incompatible.toString());
+                            }
                         }
                         return null;
                     });
             Object subscription = addListener.invoke(api, proxyListener);
             Method close = AutoCloseable.class.getMethod("close");
             logger.info("SVSync visibility state and transition integration enabled");
-            return Optional.of(new SVSyncVisibilityIntegration(api, hasState, getVisibility, subscription, close));
+            return Optional.of(new SVSyncVisibilityIntegration(
+                    api, hasState, getVisibility, subscription, close, confirmed, logger));
         } catch (ReflectiveOperationException | LinkageError | RuntimeException incompatible) {
             logger.warn("SVSync API is absent or incompatible; LunaChat presence defaults to PUBLIC: {}",
                     incompatible.toString());
@@ -74,10 +87,33 @@ final class SVSyncVisibilityIntegration implements AutoCloseable {
             // SVSync deliberately uses UNKNOWN for a missing cache entry. That
             // means "not observed", not vanished; only an explicit HIDDEN
             // state may make an otherwise online Velocity player undiscoverable.
-            if (!Boolean.TRUE.equals(hasState.invoke(api, player))) return PresenceCodec.Visibility.PUBLIC;
-            return parse(getVisibility.invoke(api, player));
+            if (!Boolean.TRUE.equals(hasState.invoke(api, player))) {
+                confirmed.remove(player);
+                return PresenceCodec.Visibility.PUBLIC;
+            }
+            PresenceCodec.Visibility current = parse(getVisibility.invoke(api, player));
+            if (current != PresenceCodec.Visibility.UNKNOWN) confirmed.put(player, current);
+            if (current == PresenceCodec.Visibility.UNKNOWN) {
+                logger.warn("SVSync returned UNKNOWN for an online cached player; treating it as PUBLIC: player={}",
+                        player);
+            }
+            return normalizeCurrent(current);
         } catch (ReflectiveOperationException | LinkageError | RuntimeException failure) {
-            return PresenceCodec.Visibility.UNKNOWN;
+            PresenceCodec.Visibility fallback = confirmed.getOrDefault(player, PresenceCodec.Visibility.UNKNOWN);
+            logger.warn("SVSync visibility query failed; using last explicit state {}: player={}, failure={}",
+                    fallback, player, failure.getClass().getSimpleName());
+            return fallback;
+        }
+    }
+
+    private static PresenceCodec.Visibility normalizeCurrent(PresenceCodec.Visibility visibility) {
+        return visibility == PresenceCodec.Visibility.HIDDEN
+                ? PresenceCodec.Visibility.HIDDEN : PresenceCodec.Visibility.PUBLIC;
+    }
+
+    void rememberConfirmed(Change change) {
+        if (change.current() != PresenceCodec.Visibility.UNKNOWN) {
+            confirmed.put(change.player(), change.current());
         }
     }
 

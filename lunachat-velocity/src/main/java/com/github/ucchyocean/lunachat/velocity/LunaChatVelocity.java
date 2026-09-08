@@ -33,7 +33,6 @@ import java.util.Set;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 @Plugin(id = "lunachat", name = "LunaChat", version = "4.0.21-SNAPSHOT",
         dependencies = {@Dependency(id = "svsync", optional = true)},
@@ -108,7 +107,7 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         PresenceCodec.Event presence = new PresenceCodec.Event(UUID.randomUUID(), event.getPlayer().getUniqueId(),
                 event.getPlayer().getUsername(), previous.isEmpty() ? PresenceCodec.Kind.JOIN : PresenceCodec.Kind.MOVE,
                 previous.map(s -> s.getServerInfo().getName()).orElse(null), event.getServer().getServerInfo().getName(), PresenceCodec.Visibility.UNKNOWN);
-        publishPresenceWhenVisible(current, event.getPlayer(), presence, 0);
+        publishPresenceWhenVisible(current, event.getPlayer(), presence);
     }
 
     @Subscribe
@@ -120,7 +119,7 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         }
         PresenceCodec.Event presence = new PresenceCodec.Event(UUID.randomUUID(), event.getPlayer().getUniqueId(),
                 event.getPlayer().getUsername(), PresenceCodec.Kind.QUIT, null, null, PresenceCodec.Visibility.UNKNOWN);
-        publishPresenceWhenVisible(current, event.getPlayer(), presence, 0);
+        publishPresenceWhenVisible(current, event.getPlayer(), presence);
     }
 
     /** Called by an SVSync-compatible bridge; null restores the no-provider PUBLIC default. */
@@ -131,18 +130,12 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
     }
 
     private void publishPresenceWhenVisible(VelocityNetworkAuthority current, com.velocitypowered.api.proxy.Player player,
-            PresenceCodec.Event event, int attempt) {
-        PresenceVisibilityPolicy.Decision decision = PresenceVisibilityPolicy.resolve(presenceVisibilityProvider, player, attempt);
+            PresenceCodec.Event event) {
+        PresenceVisibilityPolicy.Decision decision = PresenceVisibilityPolicy.resolve(presenceVisibilityProvider, player);
         PresenceCodec.Visibility visibility = decision.visibility();
-        if (decision.retry()) {
-            final int next = attempt + 1;
-            final PresenceCodec.Event pendingEvent = event;
-            proxy.getScheduler().buildTask(this, () -> publishPresenceWhenVisible(current, player, pendingEvent, next))
-                    .delay(1, TimeUnit.SECONDS).schedule();
-            return;
-        }
-        if (visibility == PresenceCodec.Visibility.UNKNOWN) {
-            logger.warn("Presence visibility remained UNKNOWN after bounded retry: player={}, kind={}, from={}, to={}",
+        if (decision.publicFallback()) {
+            logger.warn("Presence visibility lookup remained UNKNOWN; publishing PUBLIC fallback so the "
+                            + "Paper-suppressed event is not lost: player={}, kind={}, from={}, to={}",
                     player.getUniqueId(), event.kind(), event.from(), event.to());
         }
         if (!player.isActive() && event.kind() != PresenceCodec.Kind.QUIT) return;
@@ -164,7 +157,7 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         if (current != null) current.tick();
         if (current != null && svsyncVisibility == null) proxy.getAllPlayers().forEach(player -> player.getCurrentServer().ifPresent(server -> {
             PresenceCodec.Visibility visibility = PresenceVisibilityPolicy
-                    .resolve(presenceVisibilityProvider, player, 3).visibility();
+                    .resolve(presenceVisibilityProvider, player).visibility();
             presenceHistory.visibilityChanged(player.getUniqueId(), player.getUsername(),
                     server.getServerInfo().getName(), visibility, Instant.now()).forEach(current::publishPresence);
         }));
@@ -217,10 +210,18 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         String currentServer = player.getCurrentServer().map(server -> server.getServerInfo().getName()).orElse(null);
         if (!visibilityChangeValidator.validAtApply(change, queued.connectionGeneration(), generation,
                 player.isActive(), currentServer)) {
+            if (change.current() == PresenceCodec.Visibility.UNKNOWN) {
+                logger.warn("Discarded ambiguous SVSync visibility transition without changing presence history: "
+                                + "player={}, previous={}, sequence={}",
+                        change.player(), change.previous(), change.sequence());
+                return;
+            }
             logger.debug("Discarded stale SVSync visibility event: player={}, sequence={}, eventServer={}, currentServer={}",
                     change.player(), change.sequence(), change.server(), currentServer);
             return;
         }
+        SVSyncVisibilityIntegration visibility = svsyncVisibility;
+        if (visibility != null) visibility.rememberConfirmed(change);
         presenceHistory.visibilityChanged(change.player(), player.getUsername(), currentServer, change.current(),
                 change.explicitReappear(), Instant.now()).forEach(current::publishPresence);
     }

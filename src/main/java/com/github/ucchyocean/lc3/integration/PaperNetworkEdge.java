@@ -44,6 +44,7 @@ import java.util.concurrent.CompletableFuture;
 final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     static final String CHANNEL = NetworkProtocol.CHANNEL;
     static final int PROTOCOL = NetworkProtocol.VERSION;
+    private static final long AUTHORITY_LEASE_MILLIS = 25_000L;
     private final LunaChatBukkit plugin;
     private final PaperIntegrationService integration;
     private volatile String nodeId = "";
@@ -83,6 +84,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private final AtomicBoolean ready = new AtomicBoolean();
     private final AtomicBoolean catalogSynchronized = new AtomicBoolean();
     private long lastHelloMillis;
+    private volatile long lastAuthorityFrameMillis;
     private int taskId;
 
     static PaperNetworkEdge create(LunaChatBukkit plugin, PaperIntegrationService integration, LunaChatConfig config) {
@@ -199,6 +201,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             if (!sessionId.equals(frame.sessionId()) || frame.epoch() != epoch) {
                 throw new FrameAuthenticationException("session mismatch");
             }
+            lastAuthorityFrameMillis = System.currentTimeMillis();
             if (frame.type() == FrameType.READY) {
                 String assignedNode = new String(frame.payload(), StandardCharsets.UTF_8).trim();
                 if (assignedNode.isEmpty() || assignedNode.length() > 128) {
@@ -412,7 +415,15 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 Instant.now().plusSeconds(30));
     }
 
-    boolean isReady() { return ready.get() && catalogSynchronized.get() && !nodeId.isBlank(); }
+    boolean isReady() {
+        return ready.get() && catalogSynchronized.get() && !nodeId.isBlank()
+                && authorityLeaseValid(lastAuthorityFrameMillis, System.currentTimeMillis());
+    }
+
+    static boolean authorityLeaseValid(long lastFrameMillis, long nowMillis) {
+        return lastFrameMillis > 0L && nowMillis >= lastFrameMillis
+                && nowMillis - lastFrameMillis <= AUTHORITY_LEASE_MILLIS;
+    }
 
     CompletableFuture<Boolean> requestMembership(ChannelId channel, UUID player, boolean joined) {
         if (!Bukkit.isPrimaryThread()) {

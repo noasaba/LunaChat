@@ -15,6 +15,21 @@ class PresenceHistoryTest {
     private static final Instant NOW = Instant.parse("2026-09-07T00:00:00Z");
 
     @Test
+    void publicJoinProducesOnePublicNotificationAndHiddenJoinProducesNone() {
+        PresenceHistory history = new PresenceHistory();
+        var publicJoin = history.connected(UUID.randomUUID(), "Alice", "lobby",
+                PresenceCodec.Visibility.PUBLIC, NOW);
+        var hiddenJoin = history.connected(UUID.randomUUID(), "Bob", "lobby",
+                PresenceCodec.Visibility.HIDDEN, NOW);
+
+        assertEquals(1, publicJoin.stream()
+                .filter(event -> event.visibility() == PresenceCodec.Visibility.PUBLIC).count());
+        assertEquals(0, hiddenJoin.stream()
+                .filter(event -> event.visibility() == PresenceCodec.Visibility.PUBLIC).count());
+        assertEquals(PresenceCodec.Kind.JOIN, publicJoin.getFirst().kind());
+    }
+
+    @Test
     void twoPaperPublicVanishMoveRevealDisconnectHasNoDuplicatesAndKeepsOrder() {
         PresenceHistory history = new PresenceHistory();
         UUID player = UUID.randomUUID();
@@ -81,6 +96,18 @@ class PresenceHistoryTest {
 
         assertTrue(history.visibilityChanged(player, "Alice", "lobby", PresenceCodec.Visibility.PUBLIC,
                 false, NOW.plusSeconds(1)).isEmpty());
+    }
+
+    @Test
+    void ambiguousHiddenToPublicSnapshotConvergesWithoutInventingAReappearance() {
+        PresenceHistory history = new PresenceHistory();
+        UUID player = UUID.randomUUID();
+        history.connected(player, "Alice", "lobby", PresenceCodec.Visibility.HIDDEN, NOW);
+
+        assertTrue(history.visibilityChanged(player, "Alice", "lobby", PresenceCodec.Visibility.PUBLIC,
+                false, NOW.plusSeconds(1)).isEmpty());
+        assertTrue(history.visibilityChanged(player, "Alice", "lobby", PresenceCodec.Visibility.PUBLIC,
+                false, NOW.plusSeconds(2)).isEmpty());
     }
 
     @Test
