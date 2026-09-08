@@ -16,6 +16,14 @@ class PresenceHistoryTest {
     private static final Instant NOW = Instant.parse("2026-09-07T00:00:00Z");
 
     @Test
+    void initialServerConnectedUsesEventDestinationBeforePlayerCurrentServerUpdates() {
+        var join = new PresenceCodec.Event(UUID.randomUUID(), UUID.randomUUID(), "Alice",
+                PresenceCodec.Kind.JOIN, null, "paper-1", PresenceCodec.Visibility.UNKNOWN);
+
+        assertEquals("paper-1", LunaChatVelocity.resolveConnectedServer(join, null));
+    }
+
+    @Test
     void publicJoinProducesOnePublicNotificationAndHiddenJoinProducesNone() {
         PresenceHistory history = new PresenceHistory();
         var publicJoin = history.connected(UUID.randomUUID(), "Alice", "lobby",

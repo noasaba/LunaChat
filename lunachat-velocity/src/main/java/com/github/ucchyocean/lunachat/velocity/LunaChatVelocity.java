@@ -144,12 +144,17 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
             if (quit != null) current.publishPresence(quit);
             return;
         }
-        String actual = player.getCurrentServer().map(s -> s.getServerInfo().getName()).orElse(null);
+        String actual = resolveConnectedServer(event, player.getCurrentServer()
+                .map(s -> s.getServerInfo().getName()).orElse(null));
         if (actual == null) return;
         var events = event.kind() == PresenceCodec.Kind.SNAPSHOT
                 ? presenceHistory.visibilityChanged(event.player(), event.name(), actual, visibility, Instant.now())
                 : presenceHistory.connected(event.player(), event.name(), actual, visibility, Instant.now());
         events.forEach(current::publishPresence);
+    }
+
+    static String resolveConnectedServer(PresenceCodec.Event event, String playerCurrentServer) {
+        return event.to() != null ? event.to() : playerCurrentServer;
     }
 
     private void tick() {
