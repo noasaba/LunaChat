@@ -1,10 +1,14 @@
 package com.github.ucchyocean.lc3.integration;
 
-/** Chooses network rendering only when it can actually replace Bukkit presence. */
+/** Presence messages are intentionally local to each Paper backend. */
 public final class PaperPresencePolicy {
     private PaperPresencePolicy() {}
 
-    public static boolean suppressLocalMessage(boolean networkEdge, boolean authorityReady) {
-        return networkEdge && authorityReady;
+    public static boolean useLocalPresence(boolean networkEdge) {
+        return networkEdge;
+    }
+
+    public static boolean canReceiveLocalPresence(boolean self, boolean canSeeSubject) {
+        return self || canSeeSubject;
     }
 }

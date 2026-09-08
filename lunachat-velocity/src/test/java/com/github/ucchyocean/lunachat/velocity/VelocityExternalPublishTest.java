@@ -64,7 +64,7 @@ class VelocityExternalPublishTest {
         }
     }
 
-    @Test void presenceBeforeDestinationHandshakeUsesLocalFallbackButStillReachesOtherBackends() throws Exception {
+    @Test void networkPresenceEventsAreDisabledInFavorOfPaperLocalMessages() throws Exception {
         try (Harness harness = new Harness(2)) {
             harness.hello("backend-a");
             harness.sent.clear();
@@ -74,10 +74,9 @@ class VelocityExternalPublishTest {
             harness.authority.tick();
             var deliveries = harness.sent.stream().filter(frame -> frame.type() == FrameType.PRESENCE
                     && presence.eventId().equals(frame.logicalMessageId())).toList();
-            assertEquals(1, deliveries.size());
+            assertEquals(0, deliveries.size());
             assertEquals(0, harness.presenceOutboxSize("backend-b"),
-                    "unsynchronized destination keeps its Bukkit local join instead of a delayed duplicate");
-            harness.presenceAck("backend-a", presence.eventId());
+                    "Paper-local JOIN/QUIT is never retained for delayed replay");
             assertEquals(0, harness.presenceOutboxSize("backend-a"));
         }
     }

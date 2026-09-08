@@ -14,6 +14,7 @@ import java.util.logging.Level;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -109,21 +110,16 @@ public class BukkitEventListener implements Listener {
      * プレイヤーのサーバー参加ごとに呼び出されるメソッド
      * @param event プレイヤー参加イベント
      */
-    @EventHandler
+    @EventHandler(priority=EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
 
         LunaChatConfig config = LunaChat.getConfig();
         Player player = event.getPlayer();
         boolean networkEdge = "network_edge".equals(config.getIntegrationRole());
-        com.github.ucchyocean.lc3.integration.PaperIntegrationService integration =
-                com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
-        boolean authorityReady = integration != null && integration.isNetworkPresenceReady();
         if (com.github.ucchyocean.lc3.integration.PaperPresencePolicy
-                .suppressLocalMessage(networkEdge, authorityReady)) {
+                .useLocalPresence(networkEdge)) {
             event.setJoinMessage(null);
-            LunaChat.getPlugin().log(Level.FINE, "Suppressed Bukkit JOIN because the authenticated LunaChat "
-                    + "authority lease is active; awaiting the network presence replacement for player="
-                    + player.getUniqueId());
+            sendLocalPresence(player, Messages.presenceLogin(player.getName()));
         }
 
         // UUIDをキャッシュ
@@ -153,19 +149,14 @@ public class BukkitEventListener implements Listener {
      * プレイヤーのサーバー退出ごとに呼び出されるメソッド
      * @param event プレイヤー退出イベント
      */
-    @EventHandler
+    @EventHandler(priority=EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
 
         boolean networkEdge = "network_edge".equals(LunaChat.getConfig().getIntegrationRole());
-        com.github.ucchyocean.lc3.integration.PaperIntegrationService integration =
-                com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
-        boolean authorityReady = integration != null && integration.isNetworkPresenceReady();
         if (com.github.ucchyocean.lc3.integration.PaperPresencePolicy
-                .suppressLocalMessage(networkEdge, authorityReady)) {
+                .useLocalPresence(networkEdge)) {
             event.setQuitMessage(null);
-            LunaChat.getPlugin().log(Level.FINE, "Suppressed Bukkit QUIT because the authenticated LunaChat "
-                    + "authority lease is active; awaiting the network presence replacement for player="
-                    + event.getPlayer().getUniqueId());
+            sendLocalPresence(event.getPlayer(), Messages.presenceQuit(event.getPlayer().getName()));
         }
 
         Player player = event.getPlayer();
@@ -193,6 +184,21 @@ public class BukkitEventListener implements Listener {
         for ( Channel channel : deleteList ) {
             LunaChat.getAPI().removeChannel(
                     channel.getName(), ChannelMember.getChannelMember(player));
+        }
+    }
+
+    /**
+     * Delivers backend-local presence only to viewers who can already see the
+     * subject. This preserves SuperVanish/Bukkit visibility without sending a
+     * global proxy notification or leaking a hidden player to Discord bridges.
+     */
+    private void sendLocalPresence(Player subject, String message) {
+        if (message == null || message.isEmpty()) return;
+        for (Player viewer : Bukkit.getOnlinePlayers()) {
+            if (com.github.ucchyocean.lc3.integration.PaperPresencePolicy
+                    .canReceiveLocalPresence(viewer.equals(subject), viewer.canSee(subject))) {
+                viewer.sendMessage(message);
+            }
         }
     }
 
