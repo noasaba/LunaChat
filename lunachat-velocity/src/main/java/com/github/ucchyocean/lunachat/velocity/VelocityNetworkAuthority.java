@@ -284,6 +284,7 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             } else if (frame.type() == FrameType.PRIVATE_ACK && frame.logicalMessageId() != null) {
                 handlePrivateAck(sourceNode, frame);
             } else if (frame.type() == FrameType.PRESENCE_ACK && frame.logicalMessageId() != null) {
+                logger.debug("Received PRESENCE_ACK from {}: eventId={}", sourceNode, frame.logicalMessageId());
                 ReliableOutbox presenceOutbox = presenceOutboxes.get(sourceNode);
                 if (presenceOutbox != null) presenceOutbox.acknowledge(frame.logicalMessageId());
             } else if (frame.type() == FrameType.ACK && frame.logicalMessageId() != null) {
@@ -538,6 +539,13 @@ final class VelocityNetworkAuthority implements AutoCloseable {
             if (localEndpoint && !isCatalogSynchronized(node)) return;
             if (!outbox.offer(event.eventId(), payload, expires, now)) {
                 logger.warn("Presence outbox for {} rejected event {}", node, event.eventId());
+                return;
+            }
+            Session session = sessions.get(node);
+            if (session != null && isCatalogSynchronized(node)) {
+                for (ReliableOutbox.Attempt attempt : outbox.pollDue(now, 32)) {
+                    sendPresenceAttempt(node, session, attempt);
+                }
             }
         });
     }
@@ -612,6 +620,8 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         SecureFrame frame = new SecureFrame(protocolVersion, session.id(), session.epoch(), attempt.sequence(),
                 attempt.frameId(), attempt.logicalMessageId(), FrameType.PRESENCE, Instant.now(),
                 attempt.expiresAt(), attempt.payload());
+        logger.debug("Dispatching presence frame to node {}: frameId={}, logicalId={}, attempt={}",
+                node, attempt.frameId(), attempt.logicalMessageId(), attempt.attempt());
         proxy.getServer(node).ifPresent(server -> server.sendPluginMessage(channel, secure.encode(frame)));
     }
 

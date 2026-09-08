@@ -20,8 +20,13 @@ final class PresenceHistory {
 
     synchronized List<PresenceCodec.Event> connected(UUID player, String name, String current,
             PresenceCodec.Visibility visibility, Instant now) {
+        return connected(player, name, current, visibility, false, now);
+    }
+
+    synchronized List<PresenceCodec.Event> connected(UUID player, String name, String current,
+            PresenceCodec.Visibility visibility, boolean initialLogin, Instant now) {
         State before = states.get(player);
-        if (before == null) {
+        if (before == null || initialLogin) {
             boolean visible = visibility == PresenceCodec.Visibility.PUBLIC;
             states.put(player, new State(name, current, current, visible ? current : null,
                     visibility, visibility == PresenceCodec.Visibility.HIDDEN, visible ? null : now, now));
@@ -103,11 +108,9 @@ final class PresenceHistory {
             states.put(player, publicState(state, now));
             return List.of();
         }
-        List<PresenceCodec.Event> reveal = new ArrayList<>(2);
+        List<PresenceCodec.Event> reveal = new ArrayList<>(1);
         if (state.joinedWhileHidden()) {
-            reveal.add(event(player, state.name(), PresenceCodec.Kind.LOGIN, null, state.loginServer(), visibility));
-            if (!state.loginServer().equals(state.currentServer())) reveal.add(event(player, state.name(),
-                    PresenceCodec.Kind.MOVE, state.loginServer(), state.currentServer(), visibility));
+            reveal.add(event(player, state.name(), PresenceCodec.Kind.LOGIN, null, state.currentServer(), visibility));
         } else if (state.lastPublicServer() != null && !state.lastPublicServer().equals(state.currentServer())) {
             reveal.add(event(player, state.name(), PresenceCodec.Kind.MOVE,
                     state.lastPublicServer(), state.currentServer(), visibility));

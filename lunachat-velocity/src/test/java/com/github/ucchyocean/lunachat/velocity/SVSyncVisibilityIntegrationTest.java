@@ -72,9 +72,9 @@ class SVSyncVisibilityIntegrationTest {
         assertEquals(1, received.size());
         assertTrue(received.get(0).explicitReappear());
         assertEquals("main", received.get(0).server());
-        assertEquals(List.of(com.github.ucchyocean.lunachat.core.network.PresenceCodec.Kind.LOGIN,
-                        com.github.ucchyocean.lunachat.core.network.PresenceCodec.Kind.MOVE),
+        assertEquals(List.of(com.github.ucchyocean.lunachat.core.network.PresenceCodec.Kind.LOGIN),
                 revealed.stream().map(com.github.ucchyocean.lunachat.core.network.PresenceCodec.Event::kind).toList());
+        assertEquals("main", revealed.get(0).to());
         integration.close();
         assertTrue(api.listener == null);
     }

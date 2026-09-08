@@ -2,6 +2,7 @@ package com.github.ucchyocean.lunachat.velocity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
@@ -60,7 +61,7 @@ class PresenceHistoryTest {
     }
 
     @Test
-    void hiddenLoginAndMovesRevealAsLoginThenOneAggregatedMove() {
+    void hiddenLoginAndMovesRevealAsNaturalLoginOnCurrentServer() {
         PresenceHistory history = new PresenceHistory();
         UUID player = UUID.randomUUID();
         history.connected(player, "Alice", "lobby", PresenceCodec.Visibility.HIDDEN, NOW);
@@ -70,14 +71,43 @@ class PresenceHistoryTest {
         var reveal = history.visibilityChanged(player, "Alice", "main",
                 PresenceCodec.Visibility.PUBLIC, NOW.plusSeconds(3));
 
-        assertEquals(2, reveal.size());
+        assertEquals(1, reveal.size());
         assertEquals(PresenceCodec.Kind.LOGIN, reveal.get(0).kind());
-        assertEquals("lobby", reveal.get(0).to());
-        assertEquals(PresenceCodec.Kind.MOVE, reveal.get(1).kind());
-        assertEquals("lobby", reveal.get(1).from());
-        assertEquals("main", reveal.get(1).to());
+        assertEquals("main", reveal.get(0).to());
+        assertNull(reveal.get(0).from());
         assertTrue(history.visibilityChanged(player, "Alice", "main",
                 PresenceCodec.Visibility.PUBLIC, NOW.plusSeconds(4)).isEmpty());
+    }
+
+    @Test
+    void initialLoginAlwaysProducesJoinEvenIfStaleSessionRemains() {
+        PresenceHistory history = new PresenceHistory();
+        UUID player = UUID.randomUUID();
+        history.connected(player, "Alice", "paper-1", PresenceCodec.Visibility.PUBLIC, NOW);
+
+        // Player reconnects before disconnect cleanup: initialLogin=true forces a fresh JOIN
+        var reconnectJoin = history.connected(player, "Alice", "paper-1",
+                PresenceCodec.Visibility.PUBLIC, true, NOW.plusSeconds(1));
+
+        assertEquals(1, reconnectJoin.size());
+        assertEquals(PresenceCodec.Kind.JOIN, reconnectJoin.get(0).kind());
+        assertEquals("paper-1", reconnectJoin.get(0).to());
+        assertNull(reconnectJoin.get(0).from());
+    }
+
+    @Test
+    void serverSwitchProducesSingleMoveEvent() {
+        PresenceHistory history = new PresenceHistory();
+        UUID player = UUID.randomUUID();
+        history.connected(player, "Alice", "paper-1", PresenceCodec.Visibility.PUBLIC, NOW);
+
+        var move = history.connected(player, "Alice", "paper-2",
+                PresenceCodec.Visibility.PUBLIC, false, NOW.plusSeconds(1));
+
+        assertEquals(1, move.size());
+        assertEquals(PresenceCodec.Kind.MOVE, move.get(0).kind());
+        assertEquals("paper-1", move.get(0).from());
+        assertEquals("paper-2", move.get(0).to());
     }
 
     @Test

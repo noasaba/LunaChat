@@ -82,6 +82,88 @@ class VelocityExternalPublishTest {
         }
     }
 
+    @Test void presenceJoinDeliveredToBothSynchronizedBackendsImmediately() throws Exception {
+        try (Harness harness = new Harness(2)) {
+            harness.hello("backend-a");
+            harness.hello("backend-b");
+            harness.sent.clear();
+
+            var codec = new PresenceCodec();
+            var join = new PresenceCodec.Event(UUID.randomUUID(), UUID.randomUUID(), "Alice",
+                    PresenceCodec.Kind.JOIN, null, "backend-a", PresenceCodec.Visibility.PUBLIC);
+            harness.authority.publishPresence(join);
+
+            var deliveries = harness.sent.stream().filter(frame -> frame.type() == FrameType.PRESENCE
+                    && join.eventId().equals(frame.logicalMessageId())).toList();
+            assertEquals(2, deliveries.size(), "Both synchronized backends receive the JOIN event immediately");
+
+            PresenceCodec.Event decoded = codec.decode(deliveries.get(0).payload());
+            assertEquals(PresenceCodec.Kind.JOIN, decoded.kind());
+            assertEquals("Alice", decoded.name());
+            assertEquals("backend-a", decoded.to());
+
+            harness.presenceAck("backend-a", join.eventId());
+            harness.presenceAck("backend-b", join.eventId());
+            assertEquals(0, harness.presenceOutboxSize("backend-a"));
+            assertEquals(0, harness.presenceOutboxSize("backend-b"));
+        }
+    }
+
+    @Test void presenceQuitDeliveredToBothSynchronizedBackends() throws Exception {
+        try (Harness harness = new Harness(2)) {
+            harness.hello("backend-a");
+            harness.hello("backend-b");
+            harness.sent.clear();
+
+            var codec = new PresenceCodec();
+            var quit = new PresenceCodec.Event(UUID.randomUUID(), UUID.randomUUID(), "Alice",
+                    PresenceCodec.Kind.QUIT, "backend-a", null, PresenceCodec.Visibility.PUBLIC);
+            harness.authority.publishPresence(quit);
+
+            var deliveries = harness.sent.stream().filter(frame -> frame.type() == FrameType.PRESENCE
+                    && quit.eventId().equals(frame.logicalMessageId())).toList();
+            assertEquals(2, deliveries.size(), "Both synchronized backends receive the QUIT event");
+
+            PresenceCodec.Event decoded = codec.decode(deliveries.get(0).payload());
+            assertEquals(PresenceCodec.Kind.QUIT, decoded.kind());
+            assertEquals("Alice", decoded.name());
+            assertEquals("backend-a", decoded.from());
+
+            harness.presenceAck("backend-a", quit.eventId());
+            harness.presenceAck("backend-b", quit.eventId());
+            assertEquals(0, harness.presenceOutboxSize("backend-a"));
+            assertEquals(0, harness.presenceOutboxSize("backend-b"));
+        }
+    }
+
+    @Test void presenceMoveDeliveredToBothSourceAndDestinationBackends() throws Exception {
+        try (Harness harness = new Harness(2)) {
+            harness.hello("backend-a");
+            harness.hello("backend-b");
+            harness.sent.clear();
+
+            var codec = new PresenceCodec();
+            var move = new PresenceCodec.Event(UUID.randomUUID(), UUID.randomUUID(), "Alice",
+                    PresenceCodec.Kind.MOVE, "backend-a", "backend-b", PresenceCodec.Visibility.PUBLIC);
+            harness.authority.publishPresence(move);
+
+            var deliveries = harness.sent.stream().filter(frame -> frame.type() == FrameType.PRESENCE
+                    && move.eventId().equals(frame.logicalMessageId())).toList();
+            assertEquals(2, deliveries.size(), "Both source and destination backends receive the MOVE event");
+
+            PresenceCodec.Event decoded = codec.decode(deliveries.get(0).payload());
+            assertEquals(PresenceCodec.Kind.MOVE, decoded.kind());
+            assertEquals("Alice", decoded.name());
+            assertEquals("backend-a", decoded.from());
+            assertEquals("backend-b", decoded.to());
+
+            harness.presenceAck("backend-a", move.eventId());
+            harness.presenceAck("backend-b", move.eventId());
+            assertEquals(0, harness.presenceOutboxSize("backend-a"));
+            assertEquals(0, harness.presenceOutboxSize("backend-b"));
+        }
+    }
+
     @Test void paperCreatedChannelIsCanonicalAndReplicatedToEveryBackend() throws Exception {
         try (Harness harness = new Harness(2)) {
             harness.hello("backend-a");

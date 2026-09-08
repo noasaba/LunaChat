@@ -141,7 +141,11 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         if (!player.isActive() && event.kind() != PresenceCodec.Kind.QUIT) return;
         if (event.kind() == PresenceCodec.Kind.QUIT) {
             PresenceCodec.Event quit = presenceHistory.disconnected(event.player(), event.name(), Instant.now());
-            if (quit != null) current.publishPresence(quit);
+            if (quit != null) {
+                logger.info("Publishing presence: kind=QUIT, player={}, name={}, from={}, visibility={}",
+                        quit.player(), quit.name(), quit.from(), quit.visibility());
+                current.publishPresence(quit);
+            }
             return;
         }
         String actual = resolveConnectedServer(event, player.getCurrentServer()
@@ -149,8 +153,13 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         if (actual == null) return;
         var events = event.kind() == PresenceCodec.Kind.SNAPSHOT
                 ? presenceHistory.visibilityChanged(event.player(), event.name(), actual, visibility, Instant.now())
-                : presenceHistory.connected(event.player(), event.name(), actual, visibility, Instant.now());
-        events.forEach(current::publishPresence);
+                : presenceHistory.connected(event.player(), event.name(), actual, visibility,
+                        event.kind() == PresenceCodec.Kind.JOIN, Instant.now());
+        events.forEach(e -> {
+            logger.info("Publishing presence: kind={}, player={}, name={}, from={}, to={}, visibility={}",
+                    e.kind(), e.player(), e.name(), e.from(), e.to(), e.visibility());
+            current.publishPresence(e);
+        });
     }
 
     static String resolveConnectedServer(PresenceCodec.Event event, String playerCurrentServer) {

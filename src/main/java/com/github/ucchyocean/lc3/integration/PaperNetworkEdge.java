@@ -268,6 +268,9 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 });
             } else if (frame.type() == FrameType.PRESENCE && isReady()) {
                 PresenceCodec.Event presence = presences.decode(frame.payload());
+                plugin.getLogger().fine("Received network presence event: kind=" + presence.kind()
+                        + ", player=" + presence.player() + ", name=" + presence.name()
+                        + ", visibility=" + presence.visibility());
                 if (admitPresence(frame.logicalMessageId(), frame.expiresAt())) {
                     updateNetworkPlayers(presence);
                     Bukkit.getScheduler().runTask(plugin, () -> renderPresence(presence));
@@ -333,7 +336,10 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                 case QUIT -> Messages.presenceQuit(p.name());
                 case SNAPSHOT -> "";
             };
-            if (!text.isEmpty()) Bukkit.broadcastMessage(text);
+            if (!text.isEmpty()) {
+                plugin.getLogger().info("Broadcast network presence: " + text);
+                Bukkit.broadcastMessage(text);
+            }
         } else if (p.visibility() == PresenceCodec.Visibility.HIDDEN) {
             for (Player viewer : Bukkit.getOnlinePlayers()) if (viewer.hasPermission("lunachat.presence.hidden")) {
                 viewer.sendMessage("[presence hidden] "+p.name()+" "+p.kind().name().toLowerCase());
