@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Velocity-owned connection history used to reconstruct a privacy-safe reveal. */
 final class PresenceHistory {
     private static final Duration HIDDEN_PATH_TTL = Duration.ofHours(6);
+    private static final Duration DISCONNECT_EVENT_GRACE = Duration.ofSeconds(30);
     private record State(String name, String loginServer, String currentServer, String lastPublicServer,
             PresenceCodec.Visibility visibility, boolean joinedWhileHidden, Instant hiddenSince, Instant lastSeen) {}
     private final Map<UUID, State> states = new ConcurrentHashMap<>();
@@ -60,7 +61,15 @@ final class PresenceHistory {
     }
 
     synchronized void discardStale(Instant now, Set<UUID> activePlayers) {
-        states.entrySet().removeIf(entry -> !activePlayers.contains(entry.getKey()));
+        // Velocity can remove a player from getAllPlayers()/mark it inactive before
+        // delivering DisconnectEvent. Keep a short tombstone window so that event
+        // remains authoritative for producing the final QUIT notification.
+        states.replaceAll((id, state) -> activePlayers.contains(id)
+                ? new State(state.name(), state.loginServer(), state.currentServer(), state.lastPublicServer(),
+                        state.visibility(), state.joinedWhileHidden(), state.hiddenSince(), now)
+                : state);
+        states.entrySet().removeIf(entry -> !activePlayers.contains(entry.getKey())
+                && entry.getValue().lastSeen().plus(DISCONNECT_EVENT_GRACE).isBefore(now));
         states.replaceAll((id, state) -> state.hiddenSince() != null
                 && state.hiddenSince().plus(HIDDEN_PATH_TTL).isBefore(now)
                 ? new State(state.name(), state.currentServer(), state.currentServer(), state.lastPublicServer(),

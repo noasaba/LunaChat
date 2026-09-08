@@ -1,6 +1,7 @@
 package com.github.ucchyocean.lunachat.velocity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
@@ -122,6 +123,23 @@ class PresenceHistoryTest {
                 PresenceCodec.Visibility.PUBLIC, NOW.plusSeconds(2)).isEmpty());
         assertTrue(history.visibilityChanged(second, "Alice", "main",
                 PresenceCodec.Visibility.PUBLIC, NOW.plusSeconds(2)).isEmpty());
+    }
+
+    @Test
+    void inactiveSnapshotBeforeDisconnectDoesNotConsumeQuitHistory() {
+        PresenceHistory history = new PresenceHistory();
+        UUID player = UUID.randomUUID();
+        history.connected(player, "Alice", "lobby", PresenceCodec.Visibility.PUBLIC, NOW);
+
+        // Velocity may report the player inactive one scheduler tick before it
+        // invokes DisconnectEvent.
+        history.discardStale(NOW.plusSeconds(1), Set.of());
+        PresenceCodec.Event quit = history.disconnected(player, "Alice", NOW.plusSeconds(2));
+
+        assertNotNull(quit);
+        assertEquals(PresenceCodec.Kind.QUIT, quit.kind());
+        assertEquals(PresenceCodec.Visibility.PUBLIC, quit.visibility());
+        assertEquals("lobby", quit.from());
     }
 
     @Test
