@@ -4,9 +4,9 @@ The independently managed versions are:
 
 | Surface | Current | Rule |
 | --- | --- | --- |
-| Product/plugins | `4.0.21-SNAPSHOT` | SemVer; Paper/Velocity released together |
-| Public Integration API | `1.0.0-SNAPSHOT` | SemVer and binary compatibility within a major |
-| LCN wire | `6` | exact match; mixed incompatible versions fail closed |
+| Product/plugins | `4.0.21` | SemVer; Paper/Velocity released together |
+| Public Integration API | `1.0.0` | SemVer and binary compatibility within a major |
+| LCN wire | `8` | exact match; mixed incompatible versions fail closed |
 | Velocity network config | `2` | sequential, line-preserving migration; reject future version |
 | Velocity channel data | `2` | machine-managed state migration; reject future schema |
 | Velocity membership data | `1` (`LCM1`) | binary machine state; fail closed on corruption |

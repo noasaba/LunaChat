@@ -31,7 +31,7 @@ import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 
-@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.21-SNAPSHOT",
+@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.21",
         dependencies = {@Dependency(id = "svsync", optional = true)},
         description = "LunaChat network authority for Velocity 4.1")
 public final class LunaChatVelocity implements LunaChatApiProvider {

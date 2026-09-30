@@ -6,10 +6,10 @@
   <parent>
     <groupId>com.github.ucchyocean</groupId>
     <artifactId>lunachat-parent</artifactId>
-    <version>4.0.21-SNAPSHOT</version>
+    <version>4.0.21</version>
   </parent>
   <artifactId>lunachat-api</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.0</version>
   <name>LunaChat Integration API</name>
   <description>Platform-independent public contracts for LunaChat integrations</description>
   <build>
