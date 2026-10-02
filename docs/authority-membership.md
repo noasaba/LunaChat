@@ -1,4 +1,4 @@
-# Authority membership (4.0.21-SNAPSHOT / wire 6)
+# Authority membership (4.0.21 / wire 8)
 
 Status: implementation and automated-test candidate. Live two-Paper/Discord
 verification remains required before deployment.
@@ -111,7 +111,7 @@ It refuses overwriting its output and never modifies the source. It imports one
 selected Paper only; it never unions another backend. Review the output before
 installation. Place it
 beside Velocity's `channels.properties` BEFORE the first wire-6 startup.
-Update all Paper and Velocity JARs together; wire 6 is incompatible with earlier wires.
+Update all Paper and Velocity JARs together; wire 8 is incompatible with earlier wires.
 
 On the first start only, Velocity consumes the seed and creates the durable
 state. A present state file always takes precedence, even if corrupt (startup
@@ -133,7 +133,7 @@ Restore catalog and membership from the same coordinated backup for rollback.
 - Paper rejects option, moderator, ban/pardon and mute/unmute changes for a
   replicated channel. Use the Velocity-only policy file above, then restart
   the authority; accepting a local Paper edit would create a security split.
-- Public integration API stays 1.0.0-SNAPSHOT; no SVSync, SuperVanish or LunaBridge
+- Public integration API is 1.0.0; no SVSync, SuperVanish or LunaBridge
   dependency is added. Paper `Player#canSee()` logic remains unchanged.
 - Automated delivery tests run the real public external API, BukkitChannel and
   modern/legacy event adapters against simulated local Bukkit players. They

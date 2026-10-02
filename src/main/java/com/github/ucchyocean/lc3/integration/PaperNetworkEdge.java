@@ -1,7 +1,6 @@
 package com.github.ucchyocean.lc3.integration;
 
 import com.github.ucchyocean.lc3.LunaChatBukkit;
-import com.github.ucchyocean.lc3.Messages;
 import com.github.ucchyocean.lc3.LunaChatConfig;
 import com.github.ucchyocean.lc3.channel.ChannelManager;
 import com.github.ucchyocean.lc3.channel.Channel;
@@ -277,7 +276,10 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                         + ", visibility=" + presence.visibility());
                 if (admitPresence(frame.logicalMessageId(), frame.expiresAt())) {
                     updateNetworkPlayers(presence);
-                    Bukkit.getScheduler().runTask(plugin, () -> renderPresence(presence));
+                    if (presence.kind() != PresenceCodec.Kind.SNAPSHOT) {
+                        plugin.getLogger().fine("Ignored legacy network presence event because JOIN/QUIT rendering is Paper-local: "
+                                + "kind=" + presence.kind() + ", player=" + presence.player());
+                    }
                 }
                 send(player, FrameType.PRESENCE_ACK, frame.logicalMessageId(), new byte[0], Instant.now().plusSeconds(10));
             }
@@ -328,30 +330,6 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
         com.github.ucchyocean.lc3.command.DataMaps.rememberPrivate(delivery.sender(), delivery.senderName(),
                 delivery.target(), delivery.targetName());
         return "DELIVERED";
-    }
-
-    private void renderPresence(PresenceCodec.Event p) {
-        if (p.kind() == PresenceCodec.Kind.SNAPSHOT) return;
-        if (p.visibility() == PresenceCodec.Visibility.PUBLIC) {
-            String text = switch (p.kind()) {
-                case JOIN -> Messages.presenceJoin(p.name());
-                case LOGIN -> Messages.presenceLogin(p.name());
-                case MOVE -> Messages.presenceMove(p.name(), p.from(), p.to());
-                case QUIT -> Messages.presenceQuit(p.name());
-                case SNAPSHOT -> "";
-            };
-            if (!text.isEmpty()) {
-                plugin.getLogger().info("Broadcast network presence: " + text);
-                Bukkit.broadcastMessage(text);
-            }
-        } else if (p.visibility() == PresenceCodec.Visibility.HIDDEN) {
-            for (Player viewer : Bukkit.getOnlinePlayers()) if (viewer.hasPermission("lunachat.presence.hidden")) {
-                viewer.sendMessage("[presence hidden] "+p.name()+" "+p.kind().name().toLowerCase());
-            }
-        } else {
-            plugin.getLogger().fine("Presence notification withheld while visibility is UNKNOWN: player=" + p.player()
-                    + ", kind=" + p.kind() + ", from=" + p.from() + ", to=" + p.to());
-        }
     }
 
     private synchronized void updateNetworkPlayers(PresenceCodec.Event event) {

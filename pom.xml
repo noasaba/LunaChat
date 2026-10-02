@@ -31,8 +31,8 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>25</maven.compiler.release>
     <lunachat.product.version>4.0.22-SNAPSHOT</lunachat.product.version>
-    <lunachat.api.version>1.0.0-SNAPSHOT</lunachat.api.version>
-    <lunachat.wire.version>7</lunachat.wire.version>
+    <lunachat.api.version>1.0.0</lunachat.api.version>
+    <lunachat.wire.version>8</lunachat.wire.version>
     <lunachat.config.schema>1</lunachat.config.schema>
     <lunachat.data.schema>1</lunachat.data.schema>
     <lunachat.velocity.config.version>2</lunachat.velocity.config.version>

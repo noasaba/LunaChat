@@ -114,17 +114,6 @@ public class BukkitEventListener implements Listener {
 
         LunaChatConfig config = LunaChat.getConfig();
         Player player = event.getPlayer();
-        boolean networkEdge = "network_edge".equals(config.getIntegrationRole());
-        com.github.ucchyocean.lc3.integration.PaperIntegrationService integration =
-                com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
-        boolean authorityReady = integration != null && integration.isNetworkPresenceReady();
-        if (com.github.ucchyocean.lc3.integration.PaperPresencePolicy
-                .suppressLocalMessage(networkEdge, authorityReady)) {
-            event.setJoinMessage(null);
-            LunaChat.getPlugin().log(Level.FINE, "Suppressed Bukkit JOIN because the authenticated LunaChat "
-                    + "authority lease is active; awaiting the network presence replacement for player="
-                    + player.getUniqueId());
-        }
 
         // UUIDをキャッシュ
         LunaChat.getUUIDCacheData().put(player.getUniqueId().toString(), player.getName());
@@ -155,19 +144,6 @@ public class BukkitEventListener implements Listener {
      */
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-
-        boolean networkEdge = "network_edge".equals(LunaChat.getConfig().getIntegrationRole());
-        com.github.ucchyocean.lc3.integration.PaperIntegrationService integration =
-                com.github.ucchyocean.lc3.integration.PaperIntegrationService.current();
-        boolean authorityReady = integration != null && integration.isNetworkPresenceReady();
-        if (com.github.ucchyocean.lc3.integration.PaperPresencePolicy
-                .suppressLocalMessage(networkEdge, authorityReady)) {
-            event.setQuitMessage(null);
-            LunaChat.getPlugin().log(Level.FINE, "Suppressed Bukkit QUIT because the authenticated LunaChat "
-                    + "authority lease is active; awaiting the network presence replacement for player="
-                    + event.getPlayer().getUniqueId());
-        }
-
         Player player = event.getPlayer();
         String pname = player.getName();
 

@@ -3,7 +3,6 @@ package com.github.ucchyocean.lunachat.velocity;
 import com.github.ucchyocean.lunachat.api.LunaChatApiProvider;
 import com.github.ucchyocean.lunachat.api.LunaChatIntegrationApi;
 import com.github.ucchyocean.lunachat.core.network.SharedPassphrase;
-import com.github.ucchyocean.lunachat.core.network.PresenceCodec;
 import com.github.ucchyocean.lunachat.core.network.NetworkProtocol;
 import com.google.inject.Inject;
 import com.velocitypowered.api.event.Subscribe;
@@ -28,13 +27,11 @@ import java.util.Base64;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
-import java.time.Instant;
-import java.util.Set;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 
-@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.21-SNAPSHOT",
+@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.21",
         dependencies = {@Dependency(id = "svsync", optional = true)},
         description = "LunaChat network authority for Velocity 4.1")
 public final class LunaChatVelocity implements LunaChatApiProvider {
@@ -46,7 +43,6 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
     private volatile VelocityNetworkAuthority authority;
     private volatile ScheduledTask networkTask;
     private volatile PresenceVisibilityProvider presenceVisibilityProvider;
-    private final PresenceHistory presenceHistory = new PresenceHistory();
     private volatile SVSyncVisibilityIntegration svsyncVisibility;
     private record QueuedVisibility(SVSyncVisibilityIntegration.Change change, long connectionGeneration) {}
     private final ArrayDeque<QueuedVisibility> visibilityChanges = new ArrayDeque<>();
@@ -104,10 +100,8 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         if (previous.isEmpty()) synchronized (visibilityChanges) {
             connectionGenerations.merge(event.getPlayer().getUniqueId(), 1L, Long::sum);
         }
-        PresenceCodec.Event presence = new PresenceCodec.Event(UUID.randomUUID(), event.getPlayer().getUniqueId(),
-                event.getPlayer().getUsername(), previous.isEmpty() ? PresenceCodec.Kind.JOIN : PresenceCodec.Kind.MOVE,
-                previous.map(s -> s.getServerInfo().getName()).orElse(null), event.getServer().getServerInfo().getName(), PresenceCodec.Visibility.UNKNOWN);
-        publishPresenceWhenVisible(current, event.getPlayer(), presence);
+        // Backend JOIN/QUIT notifications are rendered only by the affected
+        // Paper server. Do not collapse this connection into a proxy MOVE.
     }
 
     @Subscribe
@@ -117,9 +111,6 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         synchronized (visibilityChanges) {
             connectionGenerations.merge(event.getPlayer().getUniqueId(), 1L, Long::sum);
         }
-        PresenceCodec.Event presence = new PresenceCodec.Event(UUID.randomUUID(), event.getPlayer().getUniqueId(),
-                event.getPlayer().getUsername(), PresenceCodec.Kind.QUIT, null, null, PresenceCodec.Visibility.UNKNOWN);
-        publishPresenceWhenVisible(current, event.getPlayer(), presence);
     }
 
     /** Called by an SVSync-compatible bridge; null restores the no-provider PUBLIC default. */
@@ -129,55 +120,9 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         if (current != null) current.setPresenceVisibilityProvider(provider);
     }
 
-    private void publishPresenceWhenVisible(VelocityNetworkAuthority current, com.velocitypowered.api.proxy.Player player,
-            PresenceCodec.Event event) {
-        PresenceVisibilityPolicy.Decision decision = PresenceVisibilityPolicy.resolve(presenceVisibilityProvider, player);
-        PresenceCodec.Visibility visibility = decision.visibility();
-        if (decision.publicFallback()) {
-            logger.warn("Presence visibility lookup remained UNKNOWN; publishing PUBLIC fallback so the "
-                            + "Paper-suppressed event is not lost: player={}, kind={}, from={}, to={}",
-                    player.getUniqueId(), event.kind(), event.from(), event.to());
-        }
-        if (!player.isActive() && event.kind() != PresenceCodec.Kind.QUIT) return;
-        if (event.kind() == PresenceCodec.Kind.QUIT) {
-            PresenceCodec.Event quit = presenceHistory.disconnected(event.player(), event.name(), Instant.now());
-            if (quit != null) {
-                logger.info("Publishing presence: kind=QUIT, player={}, name={}, from={}, visibility={}",
-                        quit.player(), quit.name(), quit.from(), quit.visibility());
-                current.publishPresence(quit);
-            }
-            return;
-        }
-        String actual = resolveConnectedServer(event, player.getCurrentServer()
-                .map(s -> s.getServerInfo().getName()).orElse(null));
-        if (actual == null) return;
-        var events = event.kind() == PresenceCodec.Kind.SNAPSHOT
-                ? presenceHistory.visibilityChanged(event.player(), event.name(), actual, visibility, Instant.now())
-                : presenceHistory.connected(event.player(), event.name(), actual, visibility,
-                        event.kind() == PresenceCodec.Kind.JOIN, Instant.now());
-        events.forEach(e -> {
-            logger.info("Publishing presence: kind={}, player={}, name={}, from={}, to={}, visibility={}",
-                    e.kind(), e.player(), e.name(), e.from(), e.to(), e.visibility());
-            current.publishPresence(e);
-        });
-    }
-
-    static String resolveConnectedServer(PresenceCodec.Event event, String playerCurrentServer) {
-        return event.to() != null ? event.to() : playerCurrentServer;
-    }
-
     private void tick() {
         VelocityNetworkAuthority current = authority;
         if (current != null) current.tick();
-        if (current != null && svsyncVisibility == null) proxy.getAllPlayers().forEach(player -> player.getCurrentServer().ifPresent(server -> {
-            PresenceCodec.Visibility visibility = PresenceVisibilityPolicy
-                    .resolve(presenceVisibilityProvider, player).visibility();
-            presenceHistory.visibilityChanged(player.getUniqueId(), player.getUsername(),
-                    server.getServerInfo().getName(), visibility, Instant.now()).forEach(current::publishPresence);
-        }));
-        Set<UUID> active = proxy.getAllPlayers().stream().filter(com.velocitypowered.api.proxy.Player::isActive)
-                .map(com.velocitypowered.api.proxy.Player::getUniqueId).collect(java.util.stream.Collectors.toUnmodifiableSet());
-        presenceHistory.discardStale(Instant.now(), active);
     }
 
     private void queueVisibilityChange(SVSyncVisibilityIntegration.Change change) {
@@ -224,20 +169,13 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         String currentServer = player.getCurrentServer().map(server -> server.getServerInfo().getName()).orElse(null);
         if (!visibilityChangeValidator.validAtApply(change, queued.connectionGeneration(), generation,
                 player.isActive(), currentServer)) {
-            if (change.current() == PresenceCodec.Visibility.UNKNOWN) {
-                logger.warn("Discarded ambiguous SVSync visibility transition without changing presence history: "
-                                + "player={}, previous={}, sequence={}",
-                        change.player(), change.previous(), change.sequence());
-                return;
-            }
+            if (change.current() == com.github.ucchyocean.lunachat.core.network.PresenceCodec.Visibility.UNKNOWN) return;
             logger.debug("Discarded stale SVSync visibility event: player={}, sequence={}, eventServer={}, currentServer={}",
                     change.player(), change.sequence(), change.server(), currentServer);
             return;
         }
         SVSyncVisibilityIntegration visibility = svsyncVisibility;
         if (visibility != null) visibility.rememberConfirmed(change);
-        presenceHistory.visibilityChanged(change.player(), player.getUsername(), currentServer, change.current(),
-                change.explicitReappear(), Instant.now()).forEach(current::publishPresence);
     }
 
     @Subscribe

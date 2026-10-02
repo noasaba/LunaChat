@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 
@@ -47,18 +46,7 @@ class SVSyncVisibilityIntegrationTest {
         Api api = new Api();
         List<SVSyncVisibilityIntegration.Change> received = new ArrayList<>();
         UUID player = UUID.randomUUID();
-        PresenceHistory history = new PresenceHistory();
-        Instant now = Instant.parse("2026-09-07T00:00:00Z");
-        history.connected(player, "Alice", "lobby",
-                com.github.ucchyocean.lunachat.core.network.PresenceCodec.Visibility.HIDDEN, now);
-        history.connected(player, "Alice", "main",
-                com.github.ucchyocean.lunachat.core.network.PresenceCodec.Visibility.HIDDEN, now.plusMillis(10));
-        List<com.github.ucchyocean.lunachat.core.network.PresenceCodec.Event> revealed = new ArrayList<>();
-        var integration = SVSyncVisibilityIntegration.connect(proxy(api), logger(), change -> {
-            received.add(change);
-            revealed.addAll(history.visibilityChanged(change.player(), "Alice", change.server(), change.current(),
-                    change.explicitReappear(), now.plusMillis(20)));
-        }).orElseThrow();
+        var integration = SVSyncVisibilityIntegration.connect(proxy(api), logger(), received::add).orElseThrow();
 
         assertEquals(com.github.ucchyocean.lunachat.core.network.PresenceCodec.Visibility.HIDDEN,
                 integration.visibility(player));
@@ -72,9 +60,6 @@ class SVSyncVisibilityIntegrationTest {
         assertEquals(1, received.size());
         assertTrue(received.get(0).explicitReappear());
         assertEquals("main", received.get(0).server());
-        assertEquals(List.of(com.github.ucchyocean.lunachat.core.network.PresenceCodec.Kind.LOGIN),
-                revealed.stream().map(com.github.ucchyocean.lunachat.core.network.PresenceCodec.Event::kind).toList());
-        assertEquals("main", revealed.get(0).to());
         integration.close();
         assertTrue(api.listener == null);
     }

@@ -527,27 +527,10 @@ final class VelocityNetworkAuthority implements AutoCloseable {
     }
 
     void publishPresence(PresenceCodec.Event event) {
-        byte[] payload = presences.encode(event);
-        Instant now = Instant.now();
-        Instant expires = now.plusSeconds(30);
-        presenceOutboxes.forEach((node, outbox) -> {
-            // An unsynchronized source/destination Paper deliberately keeps
-            // Bukkit's local JOIN/QUIT message. Replaying the same event after
-            // its handshake would duplicate that local fallback. Other nodes
-            // have no fallback, so retain their delivery until they synchronize.
-            boolean localEndpoint = node.equals(event.from()) || node.equals(event.to());
-            if (localEndpoint && !isCatalogSynchronized(node)) return;
-            if (!outbox.offer(event.eventId(), payload, expires, now)) {
-                logger.warn("Presence outbox for {} rejected event {}", node, event.eventId());
-                return;
-            }
-            Session session = sessions.get(node);
-            if (session != null && isCatalogSynchronized(node)) {
-                for (ReliableOutbox.Attempt attempt : outbox.pollDue(now, 32)) {
-                    sendPresenceAttempt(node, session, attempt);
-                }
-            }
-        });
+        // JOIN/QUIT is intentionally Paper-local. Keep the Wire 8 PRESENCE
+        // snapshot for tab completion, but never enqueue a network event that
+        // could turn a backend switch into a cross-server MOVE notification.
+        logger.debug("Ignored network presence publication: kind={}, player={}", event.kind(), event.player());
     }
 
     private void sendPresenceSnapshot(String node) {
