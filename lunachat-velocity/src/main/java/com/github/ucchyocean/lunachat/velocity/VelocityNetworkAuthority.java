@@ -533,6 +533,30 @@ final class VelocityNetworkAuthority implements AutoCloseable {
         logger.debug("Ignored network presence publication: kind={}, player={}", event.kind(), event.player());
     }
 
+    /** Wire 8 edges update the player directory without rendering JOIN/QUIT chat. */
+    synchronized void refreshPlayerDirectory(com.velocitypowered.api.proxy.Player player, String server) {
+        sendPlayerDirectoryUpdate(new PresenceCodec.Event(UUID.randomUUID(), player.getUniqueId(),
+                player.getUsername(), PresenceCodec.Kind.SNAPSHOT, null, server, visibilityOf(player)));
+    }
+
+    synchronized void removePlayerFromDirectory(UUID player, String name) {
+        sendPlayerDirectoryUpdate(new PresenceCodec.Event(UUID.randomUUID(), player, name,
+                PresenceCodec.Kind.QUIT, null, null, PresenceCodec.Visibility.PUBLIC));
+    }
+
+    private void sendPlayerDirectoryUpdate(PresenceCodec.Event update) {
+        if (protocolVersion < 8) return;
+        byte[] payload = presences.encode(update);
+        // Do not replay stale deltas after reconnect. The periodic full snapshot
+        // repairs failed sends, and only synchronized Wire 8 edges ignore rendering.
+        sessions.forEach((node, session) -> {
+            if (isCatalogSynchronized(node)) {
+                sendNow(node, session.id(), session.epoch(), FrameType.PRESENCE, update.eventId(),
+                        payload, Instant.now().plusSeconds(10));
+            }
+        });
+    }
+
     private void sendPresenceSnapshot(String node) {
         Session session = sessions.get(node); if (session == null) return;
         proxy.getAllPlayers().forEach(player -> player.getCurrentServer().ifPresent(server -> {

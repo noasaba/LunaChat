@@ -331,7 +331,7 @@ public class BukkitEventListener implements Listener {
             // 置き換え設定になっていて、発言者がパーミッションを持っているなら、置き換えする
             if ( config.isEnableNormalChatColorCode() &&
                     event.getPlayer().hasPermission("lunachat.allowcc") ) {
-                message = Utility.replaceColorCode(message);
+                message = Utility.replaceColorCodeOutsideUrls(message);
             }
 
             // hideされているプレイヤーを、recipientから抜く

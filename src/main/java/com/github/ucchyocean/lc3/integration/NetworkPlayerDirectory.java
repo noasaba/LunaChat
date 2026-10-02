@@ -25,7 +25,11 @@ final class NetworkPlayerDirectory {
         }
     }
 
-    synchronized List<String> namesStartingWith(String prefix) {
+    synchronized List<String> namesStartingWith(String prefix, boolean synchronizedWithAuthority) {
+        if (!synchronizedWithAuthority) {
+            players.clear();
+            return List.of();
+        }
         String needle = prefix == null ? "" : prefix.toLowerCase(Locale.ROOT);
         return players.values().stream()
                 .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(needle))

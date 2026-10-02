@@ -139,6 +139,35 @@ class BoundedMessageGatewayTest {
         gateway.close();
     }
 
+    @Test void shutdownCompletesQueuedMinecraftAcceptanceInsteadOfLeavingFuturePending() throws Exception {
+        InMemoryChannelDirectory directory = new InMemoryChannelDirectory(); directory.put(CHANNEL);
+        var gateway = new BoundedMessageGateway(directory, message -> CompletableFuture.completedFuture(message),
+                Clock.fixed(NOW, ZoneOffset.UTC), "paper-1", 4, 4);
+        var field = BoundedMessageGateway.class.getDeclaredField("admission");
+        field.setAccessible(true);
+        var executor = (ThreadPoolExecutor) field.get(gateway);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        executor.execute(() -> {
+            started.countDown();
+            try { release.await(); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        });
+        try {
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            var message = new AcceptedMessage(UUID.randomUUID(), CHANNEL.id(), CHANNEL.name(),
+                    new MessageOrigin(OriginKind.MINECRAFT, "lunachat.minecraft", "shutdown"),
+                    new MessageAuthor.Player(UUID.randomUUID(), "player", "Player"),
+                    "paper-1", "hello", NOW, NOW.plusSeconds(60));
+            var pending = gateway.acceptAsync(message).toCompletableFuture();
+            assertFalse(pending.isDone());
+            gateway.close();
+            assertFalse(pending.get(1, TimeUnit.SECONDS));
+        } finally {
+            release.countDown();
+            gateway.close();
+        }
+    }
+
     private static ExternalMessageRequest request(String id, Instant created) {
         return new ExternalMessageRequest(CHANNEL.id(), new ExternalMessageIdentity("lunabridge.discord", id),
                 new MessageAuthor.External("lunabridge.discord", "user", "User"), "hello", created, Duration.ofMinutes(1));

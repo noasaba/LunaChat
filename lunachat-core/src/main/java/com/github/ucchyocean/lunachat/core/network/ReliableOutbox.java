@@ -49,6 +49,11 @@ public final class ReliableOutbox {
         return entry == null ? Optional.empty() : Optional.of(Arrays.copyOf(entry.payload, entry.payload.length));
     }
     public synchronized boolean contains(UUID logicalId, Instant now) { purge(now); return entries.containsKey(logicalId); }
-    private void purge(Instant now) { entries.values().removeIf(entry -> !entry.expiresAt.isAfter(now) || entry.attempts >= maxAttempts); }
+    private void purge(Instant now) {
+        // The final send still needs time to receive an ACK. Its payload is also
+        // used to authenticate the ACK, so keep it until the next retry deadline.
+        entries.values().removeIf(entry -> !entry.expiresAt.isAfter(now)
+                || (entry.attempts >= maxAttempts && !entry.nextAttempt.isAfter(now)));
+    }
     public synchronized int size() { return entries.size(); }
 }

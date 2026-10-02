@@ -108,17 +108,26 @@ public class Utility {
      * @return transformed text with URL spans left unchanged
      */
     public static String replaceColorCodeOutsideUrls(String source) {
+        return transformOutsideUrls(source, Utility::replaceColorCode);
+    }
+
+    /** Removes message formatting without stripping query parameters or URL fragments. */
+    public static String stripColorCodeOutsideUrls(String source) {
+        return transformOutsideUrls(source, Utility::stripColorCode);
+    }
+
+    private static String transformOutsideUrls(String source, java.util.function.UnaryOperator<String> transform) {
         if (source == null) return null;
 
         Matcher matcher = URL_PATTERN.matcher(source);
         StringBuilder result = new StringBuilder(source.length());
         int lastEnd = 0;
         while (matcher.find()) {
-            result.append(replaceColorCode(source.substring(lastEnd, matcher.start())));
+            result.append(transform.apply(source.substring(lastEnd, matcher.start())));
             result.append(matcher.group());
             lastEnd = matcher.end();
         }
-        result.append(replaceColorCode(source.substring(lastEnd)));
+        result.append(transform.apply(source.substring(lastEnd)));
         return result.toString();
     }
 

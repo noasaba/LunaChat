@@ -38,6 +38,20 @@ public final class BoundedMessageGateway implements MessageGateway, AutoCloseabl
         private void rejectClosed() { result.complete(unavailable("GATEWAY_CLOSED")); }
     }
 
+    private final class AcceptTask implements Runnable {
+        private final AcceptedMessage message;
+        private final CompletableFuture<Boolean> result;
+        private AcceptTask(AcceptedMessage message, CompletableFuture<Boolean> result) {
+            this.message = message;
+            this.result = result;
+        }
+        @Override public void run() {
+            try { result.complete(acceptOnAdmissionThread(message)); }
+            catch (RuntimeException failure) { result.completeExceptionally(failure); }
+        }
+        private void rejectClosed() { result.complete(false); }
+    }
+
     public BoundedMessageGateway(ChannelDirectory channels, ExternalDeliverySink sink, Clock clock,
             String sourceServerId, int maxPending, int maxReceipts) {
         this.channels = Objects.requireNonNull(channels);
@@ -80,6 +94,10 @@ public final class BoundedMessageGateway implements MessageGateway, AutoCloseabl
     }
 
     private synchronized void publishOnAdmissionThread(ExternalMessageRequest request, CompletableFuture<ExternalPublishResult> result) {
+        if (closed.get()) {
+            result.complete(unavailable("GATEWAY_CLOSED"));
+            return;
+        }
         Instant now = clock.instant();
         purge(now);
         Receipt existing = externalReceipts.get(request.identity());
@@ -188,16 +206,14 @@ public final class BoundedMessageGateway implements MessageGateway, AutoCloseabl
             return result;
         }
         try {
-            admission.execute(() -> {
-                try { result.complete(acceptOnAdmissionThread(message)); }
-                catch (RuntimeException failure) { result.completeExceptionally(failure); }
-            });
+            admission.execute(new AcceptTask(message, result));
         }
         catch (RejectedExecutionException full) { result.complete(false); }
         return result;
     }
 
     private synchronized boolean acceptOnAdmissionThread(AcceptedMessage message) {
+        if (closed.get()) return false;
         Instant now = clock.instant();
         purge(now);
         if (observedLogicalIds.containsKey(message.messageId())) return false;
@@ -228,6 +244,7 @@ public final class BoundedMessageGateway implements MessageGateway, AutoCloseabl
         }
         for (Runnable queued : admission.shutdownNow()) {
             if (queued instanceof BoundedMessageGateway.PublishTask publish) publish.rejectClosed();
+            else if (queued instanceof BoundedMessageGateway.AcceptTask accept) accept.rejectClosed();
         }
         observers.shutdownNow();
     }

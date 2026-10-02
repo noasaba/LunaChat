@@ -31,7 +31,7 @@ import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 
-@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.21",
+@Plugin(id = "lunachat", name = "LunaChat", version = "4.0.22-SNAPSHOT",
         dependencies = {@Dependency(id = "svsync", optional = true)},
         description = "LunaChat network authority for Velocity 4.1")
 public final class LunaChatVelocity implements LunaChatApiProvider {
@@ -102,6 +102,7 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         }
         // Backend JOIN/QUIT notifications are rendered only by the affected
         // Paper server. Do not collapse this connection into a proxy MOVE.
+        current.refreshPlayerDirectory(event.getPlayer(), event.getServer().getServerInfo().getName());
     }
 
     @Subscribe
@@ -111,6 +112,7 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         synchronized (visibilityChanges) {
             connectionGenerations.merge(event.getPlayer().getUniqueId(), 1L, Long::sum);
         }
+        current.removePlayerFromDirectory(event.getPlayer().getUniqueId(), event.getPlayer().getUsername());
     }
 
     /** Called by an SVSync-compatible bridge; null restores the no-provider PUBLIC default. */
@@ -176,6 +178,7 @@ public final class LunaChatVelocity implements LunaChatApiProvider {
         }
         SVSyncVisibilityIntegration visibility = svsyncVisibility;
         if (visibility != null) visibility.rememberConfirmed(change);
+        current.refreshPlayerDirectory(player, currentServer);
     }
 
     @Subscribe

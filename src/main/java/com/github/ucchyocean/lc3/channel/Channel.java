@@ -293,9 +293,9 @@ public abstract class Channel {
         // カラーコード置き換え
         // チャンネルで許可されていて、発言者がパーミッションを持っている場合に置き換える
         if ( isAllowCC() && player.hasPermission("lunachat.allowcc") ) {
-            maskedMessage = Utility.replaceColorCode(maskedMessage);
+            maskedMessage = Utility.replaceColorCodeOutsideUrls(maskedMessage);
         } else {
-            maskedMessage = Utility.stripColorCode(maskedMessage);
+            maskedMessage = Utility.stripColorCodeOutsideUrls(maskedMessage);
         }
 
         // LunaChatChannelChatEvent イベントコール

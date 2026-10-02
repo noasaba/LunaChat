@@ -343,7 +343,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             ChannelMember member = ChannelMember.getChannelMember(local);
             if (PlayerVisibility.isVisibleTo(sender, member) && local.getName().toLowerCase(java.util.Locale.ROOT).startsWith(needle)) names.add(local.getName());
         }
-        names.addAll(networkPlayers.namesStartingWith(needle));
+        names.addAll(networkPlayers.namesStartingWith(needle, isReady()));
         return java.util.List.copyOf(names);
     }
 
@@ -478,6 +478,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
         creates.values().forEach(p -> p.completion.complete(PaperIntegrationService.ChannelCreationResult.UNAVAILABLE));
         creates.clear();
         presenceReceipts.clear();
+        networkPlayers.reset();
         ready.set(false);
         catalogSynchronized.set(false);
         nodeId = "";
