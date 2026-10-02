@@ -95,6 +95,20 @@ public class ClickableFormatTest extends TestCase {
         assertTrue(hasOpenUrl(comps, "http://example.org/test"));
     }
 
+    public void testColorCodeLookingUrlParametersRemainClickableAndColorCodesStillWorkOutsideUrls() {
+        String url = "https://example.invalid/image.png?x=1&amp;b=2&c=3";
+        String rawMessage = "&aBefore " + url + " &cAfter";
+        String colorizedMessage = Utility.replaceColorCodeOutsideUrls(rawMessage);
+
+        assertEquals("\u00A7aBefore " + url + " \u00A7cAfter", colorizedMessage);
+
+        ClickableFormat format = ClickableFormat.makeChannelClickableMessage(colorizedMessage, "global");
+        BaseComponent[] components = format.makeTextComponent();
+
+        assertEquals("Before " + url + " After", makePlainText(components));
+        assertTrue(hasOpenUrlWithText(components, url));
+    }
+
     public void testSingleTrailingCharacterIsNotDropped() {
         ClickableFormat f = ClickableFormat.makeChannelClickableMessage("x", "global");
         assertEquals("x", Utility.stripColorCode(makeLegacyText(f.makeTextComponent())));
@@ -116,6 +130,15 @@ public class ClickableFormatTest extends TestCase {
         return false;
     }
 
+    private static boolean hasOpenUrlWithText(BaseComponent[] components, String url) {
+        for (BaseComponent component : components) {
+            ClickEvent click = component.getClickEvent();
+            if (click != null && click.getAction() == ClickEvent.Action.OPEN_URL
+                    && url.equals(click.getValue()) && url.equals(component.toPlainText())) return true;
+        }
+        return false;
+    }
+
     private static boolean hasRunCommand(BaseComponent[] components, String command) {
         for (BaseComponent component : components) {
             ClickEvent click = component.getClickEvent();
@@ -129,6 +152,14 @@ public class ClickableFormatTest extends TestCase {
         StringBuilder builder = new StringBuilder();
         for ( BaseComponent comp : comps ) {
             builder.append(comp.toLegacyText());
+        }
+        return builder.toString();
+    }
+
+    private static String makePlainText(BaseComponent[] comps) {
+        StringBuilder builder = new StringBuilder();
+        for ( BaseComponent comp : comps ) {
+            builder.append(comp.toPlainText());
         }
         return builder.toString();
     }

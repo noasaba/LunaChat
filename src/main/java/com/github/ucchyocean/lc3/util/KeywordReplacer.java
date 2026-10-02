@@ -49,7 +49,7 @@ public class KeywordReplacer {
      * 文字列内のカラーコード候補（&a）を、カラーコード（§a）に置き換えする
      */
     public void translateColorCode() {
-        str = new StringBuilder(Utility.replaceColorCode(str.toString()));
+        str = new StringBuilder(Utility.replaceColorCodeOutsideUrls(str.toString()));
     }
 
     /**

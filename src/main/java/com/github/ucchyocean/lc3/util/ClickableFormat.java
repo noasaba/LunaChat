@@ -43,7 +43,7 @@ public class ClickableFormat {
             "＜type=SUGGEST_COMMAND text=\"%s\" hover=\"%s\" command=\"%s\"＞";
     private static final String PLACEHOLDER_PATTERN =
             "＜type=(SUGGEST_COMMAND|RUN_COMMAND) text=\"([^\"]*)\" hover=\"([^\"]*)\" command=\"([^\"]*)\"＞";
-    private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s§]+", Pattern.CASE_INSENSITIVE);
+    private static final Pattern URL_PATTERN = Utility.URL_PATTERN;
     private static final String URL_TRAILING_PUNCTUATION = ".,!?;:)]}";
 
     private KeywordReplacer message;

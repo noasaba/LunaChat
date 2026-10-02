@@ -447,7 +447,7 @@ public abstract class Channel {
         if (!canonicalContent) {
             // カラーコード置き換え チャンネルで許可されている場合に置き換える。
             if ( isAllowCC() ) {
-                maskedMessage = Utility.replaceColorCode(maskedMessage);
+                maskedMessage = Utility.replaceColorCodeOutsideUrls(maskedMessage);
             }
         }
 

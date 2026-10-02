@@ -15,6 +15,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.util.Locale;
 import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 
 import com.github.ucchyocean.lc3.LunaChat;
@@ -26,6 +28,8 @@ import com.google.common.io.Files;
  * @author ucchy
  */
 public class Utility {
+
+    static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s§]+", Pattern.CASE_INSENSITIVE);
 
     /**
      * jarファイルの中に格納されているファイルを、jarファイルの外にコピーするメソッド
@@ -94,6 +98,28 @@ public class Utility {
         if (source == null) return null;
         return replaceWebColorCode(source)
                 .replaceAll("&([0-9a-fk-orA-FK-OR])", "\u00A7$1");
+    }
+
+    /**
+     * Replaces legacy color codes in non-URL text while preserving URLs exactly.
+     * Color-code-looking query parameters (for example, {@code &a} or {@code &b})
+     * are part of the URL and must not be converted to formatting codes.
+     * @param source text to transform
+     * @return transformed text with URL spans left unchanged
+     */
+    public static String replaceColorCodeOutsideUrls(String source) {
+        if (source == null) return null;
+
+        Matcher matcher = URL_PATTERN.matcher(source);
+        StringBuilder result = new StringBuilder(source.length());
+        int lastEnd = 0;
+        while (matcher.find()) {
+            result.append(replaceColorCode(source.substring(lastEnd, matcher.start())));
+            result.append(matcher.group());
+            lastEnd = matcher.end();
+        }
+        result.append(replaceColorCode(source.substring(lastEnd)));
+        return result.toString();
     }
 
     /**
