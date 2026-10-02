@@ -77,7 +77,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     private final Map<UUID, CompletableFuture<PrivateMessageCodec.Result>> privateRequests = new LinkedHashMap<>();
     private final Map<UUID, Instant> privateReceipts = new LinkedHashMap<>();
     private final Map<UUID, Instant> presenceReceipts = new LinkedHashMap<>();
-    private final Map<UUID, String> networkPlayers = new LinkedHashMap<>();
+    private final NetworkPlayerDirectory networkPlayers = new NetworkPlayerDirectory();
     private final UUID sessionId = UUID.randomUUID();
     private final long epoch = System.currentTimeMillis();
     private final AtomicLong sequence = new AtomicLong();
@@ -221,6 +221,10 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
                             snapshot = catalog;
                         }
                         completeCreatedChannels();
+                        // Velocity sends a complete presence snapshot after this
+                        // acknowledgement. Drop entries left behind by any QUIT
+                        // events missed while this edge was disconnected.
+                        networkPlayers.reset();
                         catalogSynchronized.set(true);
                         send(player, FrameType.STATE, null, channelStates.encode(snapshot), Instant.now().plusSeconds(30));
                     } catch (RuntimeException rejectedCatalog) {
@@ -351,12 +355,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
     }
 
     private synchronized void updateNetworkPlayers(PresenceCodec.Event event) {
-        if (event.visibility() == PresenceCodec.Visibility.PUBLIC) {
-            if (event.kind() == PresenceCodec.Kind.QUIT) networkPlayers.remove(event.player());
-            else networkPlayers.put(event.player(), event.name());
-        } else {
-            networkPlayers.remove(event.player());
-        }
+        networkPlayers.apply(event);
     }
 
     synchronized java.util.List<String> visibleNetworkPlayerNames(ChannelMember sender, String prefix) {
@@ -366,7 +365,7 @@ final class PaperNetworkEdge implements PluginMessageListener, AutoCloseable {
             ChannelMember member = ChannelMember.getChannelMember(local);
             if (PlayerVisibility.isVisibleTo(sender, member) && local.getName().toLowerCase(java.util.Locale.ROOT).startsWith(needle)) names.add(local.getName());
         }
-        for (String name : networkPlayers.values()) if (name.toLowerCase(java.util.Locale.ROOT).startsWith(needle)) names.add(name);
+        names.addAll(networkPlayers.namesStartingWith(needle));
         return java.util.List.copyOf(names);
     }
 
